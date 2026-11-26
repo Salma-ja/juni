@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "JUNI",
+    "slug": "juni",
+    "version": "1.0.0",
+    "scheme": "juni",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": ["expo-router"],
+    "ios": { "bundleIdentifier": "com.juni.carpool" },
+    "android": { "package": "com.juni.carpool" }
+  }
+}
