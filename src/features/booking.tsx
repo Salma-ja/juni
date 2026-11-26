@@ -8,6 +8,7 @@ import {
   Notice, Page, Pile, Row, spread,
 } from '@/components/ui';
 import { RouteTitle } from '@/features/planning';
+import { useRideSchedule } from '@/features/rideSchedule';
 import { color } from '@/theme';
 
 const ruleChecks = [
@@ -19,13 +20,14 @@ const ruleChecks = [
 
 export function BookingSummary() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   return (
     <Page>
       <Header title="Review booking" onBack={() => router.dismissTo('/group')} />
       <View style={styles.summaryRoute}>
-        <Copy size={9} weight={700} tint="#F2A3CC">Tomorrow</Copy>
-        <RouteTitle light />
-        <Copy size={10} tint="#CFC5DA">7:20 AM · Est. arrival 7:52 AM</Copy>
+        <Copy size={9} weight={700} tint="#F2A3CC">{schedule.departureDate}</Copy>
+        <RouteTitle light destination={schedule.campus.code} />
+        <Copy size={10} tint="#CFC5DA">{`${schedule.departure} · Est. arrival ${schedule.arrival}`}</Copy>
       </View>
       <Card style={styles.ruleChecks}>
         <Eyebrow>AUTOMATIC RULE CHECK</Eyebrow>
@@ -47,7 +49,7 @@ export function BookingSummary() {
         <SummaryLine label="Total prepaid" value="1.50 JD" total />
       </Card>
       <Notice icon={LockKeyhole} tint="#557068" style={styles.secureNote}>Your seat is held for 5 minutes during payment.</Notice>
-      <Button icon={CreditCard} style={styles.sticky} onPress={() => router.push('/payment')}>Confirm payment</Button>
+      <Button icon={CreditCard} style={styles.sticky} onPress={() => router.push({ pathname: '/payment', params: schedule.params })}>Confirm payment</Button>
     </Page>
   );
 }
@@ -63,6 +65,7 @@ function SummaryLine({ label, value, total = false }: { label: string; value: st
 
 export function Payment() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   const [failed, setFailed] = useState(false);
   return (
     <Page>
@@ -73,7 +76,8 @@ export function Payment() {
         <Copy size={42} weight={800} style={{ letterSpacing: -2.1 }}>
           1.50 <Copy size={14} weight={800}>JD</Copy>
         </Copy>
-        <Copy size={10} tint={color.muted}>One seat · Tomorrow at 7:20 AM</Copy>
+        <Copy size={10} tint={color.muted}>{`One seat · ${schedule.departureDate} at ${schedule.departure}`}</Copy>
+        <Copy size={10} tint={color.muted}>{schedule.campus.label}</Copy>
       </Pile>
       <Card style={styles.identifiers}>
         <Identifier label="Payment ID" value="PAY-83J1-024" />
@@ -94,7 +98,7 @@ export function Payment() {
       )}
       <Pile gap={10} style={styles.simulation}>
         <Eyebrow>CHOOSE A TEST OUTCOME</Eyebrow>
-        <Button icon={CheckCircle2} onPress={() => router.push('/status')}>Simulate payment success</Button>
+        <Button icon={CheckCircle2} onPress={() => router.push({ pathname: '/status', params: schedule.params })}>Simulate payment success</Button>
         <Button icon={AlertTriangle} tone="secondary" onPress={() => setFailed(true)}>Simulate payment failure</Button>
       </Pile>
       <Copy size={8} tint="#929E9B" style={[center, { marginTop: 8 }]}>This payment screen is for product testing only.</Copy>
@@ -125,6 +129,7 @@ const bookingSteps = ['Searching', 'Group suggested', 'Group full · 4/4', 'Awai
 
 export function BookingStatus() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   const [confirmed, setConfirmed] = useState(false);
   const Icon = confirmed ? CheckCircle2 : Clock3;
   return (
@@ -160,7 +165,7 @@ export function BookingStatus() {
       </View>
       <DemoBanner icon={Info} title="Captain assignment is simulated" detail="For the JUNI MVP demonstration." subtle />
       {confirmed
-        ? <Button style={{ marginTop: 13 }} onPress={() => router.push('/trip')}>View trip details</Button>
+        ? <Button style={{ marginTop: 13 }} onPress={() => router.push({ pathname: '/trip', params: schedule.params })}>View trip details</Button>
         : <Button style={{ marginTop: 13 }} onPress={() => setConfirmed(true)}>Simulate captain confirmation</Button>}
     </Page>
   );

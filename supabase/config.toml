@@ -1,0 +1,36 @@
+project_id = "juni"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 17
+
+[local_smtp]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:8083"
+enable_signup = true
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+double_confirm_changes = true
+otp_length = 6
+
+[auth.email.template.email_change]
+subject = "Verify your JUNI university email"
+content_path = "./supabase/templates/university-email.html"
+
+[auth.sms]
+enable_signup = true
+enable_confirmations = true
+template = "Your JUNI verification code is {{ .Code }}."
+max_frequency = "60s"

@@ -42,6 +42,8 @@ Desktop.ini
 
 # Expo, Metro and native build artifacts
 .expo-shared/
+supabase/.temp/
+supabase/.branches/
 .metro-health-check*
 *.log
 *.tsbuildinfo

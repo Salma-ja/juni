@@ -1,29 +1,56 @@
 import { useRouter } from 'expo-router';
 import {
-  ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, Clock3, Info, LockKeyhole,
+  ArrowRight, BadgeCheck, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Info, LockKeyhole,
   MapPin, Navigation, Route, ShieldCheck, Sparkles, Star, UserPlus, Users, CircleUserRound, X, Zap,
 } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import {
-  Avatar, Badge, Button, Card, center, Copy, Eyebrow, fill, Header, IconButton,
+  Avatar, Badge, BottomSheet, Button, Card, center, Copy, Eyebrow, Field, fill, Header, IconButton,
   InfoRow, Notice, Page, Pile, RouteCard, Row, SectionHeading, spread, Tile,
 } from '@/components/ui';
 import { color, shadow } from '@/theme';
+import { campuses, getSchedule, parseSchedule, useRideSchedule, type Schedule } from '@/features/rideSchedule';
 
 export function PlanRide() {
   const router = useRouter();
+  const initialSchedule = useRideSchedule();
+  const [schedule, setSchedule] = useState(initialSchedule.params);
+  const [editing, setEditing] = useState<keyof Schedule | null>(null);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+  const [selectingCampus, setSelectingCampus] = useState(false);
+  const display = getSchedule(schedule);
+
+  function edit(field: keyof Schedule) {
+    setDraft(schedule[field]);
+    setError('');
+    setEditing(field);
+  }
+
+  function save() {
+    if (!editing) return;
+    const candidate = { ...schedule, [editing]: draft.trim() };
+    const date = parseSchedule(candidate.date, candidate.classTime);
+    if (!date) {
+      setError(editing === 'date' ? 'Enter a valid date as YYYY-MM-DD.' : 'Enter a valid time as HH:MM (24-hour clock).');
+      return;
+    }
+    setSchedule(candidate);
+    setEditing(null);
+  }
   return (
     <Page>
       <Header title="Plan a ride" eyebrow="RIDE DETAILS" onBack={() => router.dismissTo('/home')} />
       <RouteCard
         start={{ label: 'PICKUP', title: 'Student Area, Irbid', detail: 'Al-Husn Road · current location' }}
-        end={{ label: 'DESTINATION', title: 'JUST Main Campus', detail: 'Verified campus' }}
+        end={{ label: 'DESTINATION', title: display.campus.label, detail: 'Tap to change university' }}
+        onEndPress={() => setSelectingCampus(true)}
       />
       <Card style={styles.inputCard}>
-        <InfoRow icon={CalendarDays} label="Ride date" value="Tomorrow, 15 April" style={styles.divider} />
-        <InfoRow icon={Clock3} label="Class starts" value="8:00 AM" />
+        <InfoRow icon={CalendarDays} label="Ride date" value={display.classDate} style={styles.divider} onPress={() => edit('date')} />
+        <InfoRow icon={Clock3} label="Class starts" value={display.classTime} onPress={() => edit('classTime')} />
       </Card>
       <View style={styles.map}>
         <Svg viewBox="0 0 350 176" preserveAspectRatio="none" style={StyleSheet.absoluteFill} width="100%" height="100%">
@@ -32,21 +59,160 @@ export function PlanRide() {
           <Path d="M20 136L292 9 M115 36L217 220" stroke="#FFFFFF" strokeWidth={11} />
         </Svg>
         <View style={styles.pickupPin}><MapPin size={20} color={color.brand} fill={color.brand} /></View>
-        <View style={styles.campusPin}><Copy size={11} tint={color.white} weight={800}>J</Copy></View>
+        <View style={styles.campusPin}><Copy size={11} tint={color.white} weight={800}>{display.campus.code[0]}</Copy></View>
         <Copy size={8} weight={800} style={styles.mapLabel}>Student Area</Copy>
-        <Copy size={8} weight={800} style={styles.campusLabel}>JUST</Copy>
+        <Copy size={8} weight={800} style={styles.campusLabel}>{display.campus.code}</Copy>
         <Pressable accessibilityRole="button" style={styles.recenter}>
           <Navigation size={16} color={color.navy} /><Copy size={8} weight={700}>Recenter</Copy>
         </Pressable>
       </View>
       <Notice icon={ShieldCheck} tint="#44665D" style={styles.softNote}>Destinations are limited to verified university campuses.</Notice>
-      <Button icon={Sparkles} onPress={() => router.push('/suggestion')} style={styles.action}>Find my group</Button>
+      {!!error && !editing && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
+      <Button icon={Sparkles} onPress={() => {
+        const start = parseSchedule(schedule.date, schedule.classTime);
+        if (!start || start.getTime() - 40 * 60_000 <= Date.now()) {
+          setError('Choose a date and class time at least 40 minutes from now.');
+          return;
+        }
+        router.push({ pathname: '/suggestion', params: schedule });
+      }} style={styles.action}>Find my group</Button>
+      {selectingCampus && (
+        <BottomSheet onClose={() => setSelectingCampus(false)}>
+          <Copy accessibilityRole="header" size={20} weight={800}>Choose a university</Copy>
+          <Card style={styles.inputCard}>
+            {campuses.map((campus, index) => {
+              const selected = campus.id === schedule.campus;
+              return (
+                <Pressable key={campus.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
+                  onPress={() => { setSchedule((current) => ({ ...current, campus: campus.id })); setSelectingCampus(false); }}
+                  style={[styles.campusOption, index < campuses.length - 1 && styles.divider, selected && styles.activeCampus]}>
+                  <Tile icon={MapPin} size={34} iconSize={17} />
+                  <Pile gap={4} style={fill}>
+                    <Copy size={12} weight={800}>{campus.name}</Copy>
+                    <Copy size={10} tint={color.muted}>{campus.code}</Copy>
+                  </Pile>
+                  {selected && <Check size={18} color={color.brand} />}
+                </Pressable>
+              );
+            })}
+          </Card>
+          <Button tone="secondary" onPress={() => setSelectingCampus(false)}>Cancel</Button>
+        </BottomSheet>
+      )}
+      {editing && (
+        <BottomSheet onClose={() => { setEditing(null); setError(''); }}>
+          <Copy accessibilityRole="header" size={20} weight={800}>{editing === 'date' ? 'Edit ride date' : 'Edit class time'}</Copy>
+          {editing === 'date'
+            ? <DateGrid selected={draft} onSelect={(value) => { setDraft(value); setError(''); }} />
+            : <TimeGrid selected={draft} onSelect={(value) => { setDraft(value); setError(''); }} onSubmit={save} />}
+          {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
+          <Button onPress={save}>Save</Button>
+          <Button tone="secondary" onPress={() => { setEditing(null); setError(''); }}>Cancel</Button>
+        </BottomSheet>
+      )}
     </Page>
+  );
+}
+
+const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const monthLabel = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' });
+const gridDateLabel = new Intl.DateTimeFormat('en-US', { dateStyle: 'full' });
+
+function DateGrid({ selected, onSelect }: { selected: string; onSelect: (value: string) => void }) {
+  const [month, setMonth] = useState(() => {
+    const date = parseSchedule(selected, '12:00') ?? new Date();
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  });
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const first = month.getDay();
+  const count = new Date(year, monthIndex + 1, 0).getDate();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const goMonth = (offset: number) => setMonth(new Date(year, monthIndex + offset, 1));
+
+  return (
+    <Pile gap={6}>
+      <Row style={spread}>
+        <IconButton icon={ChevronLeft} label="Previous month" onPress={() => goMonth(-1)} />
+        <Copy size={15} weight={800}>{monthLabel.format(month)}</Copy>
+        <IconButton icon={ChevronRight} label="Next month" onPress={() => goMonth(1)} />
+      </Row>
+      <Row gap={2}>
+        {weekdays.map((day) => <Copy key={day} size={10} weight={700} tint={color.muted} style={[fill, center]}>{day}</Copy>)}
+      </Row>
+      {Array.from({ length: Math.ceil((first + count) / 7) }, (_, week) => (
+        <Row key={week} gap={2}>
+          {weekdays.map((weekday, column) => {
+            const day = week * 7 + column - first + 1;
+            if (day < 1 || day > count) return <View key={weekday} style={fill} />;
+            const date = new Date(year, monthIndex, day);
+            const value = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            return <ScheduleCell key={weekday} label={String(day)} accessibilityLabel={gridDateLabel.format(date)}
+              selected={value === selected} disabled={date < today} onPress={() => onSelect(value)} />;
+          })}
+        </Row>
+      ))}
+    </Pile>
+  );
+}
+
+const timeBlocks = [
+  { label: 'Morning', start: 360, end: 720 },
+  { label: 'Afternoon', start: 720, end: 1080 },
+  { label: 'Evening', start: 1080, end: 1440 },
+];
+
+function TimeGrid({ selected, onSelect, onSubmit }: {
+  selected: string; onSelect: (value: string) => void; onSubmit: () => void;
+}) {
+  const [initialHour] = selected.split(':').map(Number);
+  const [blockIndex, setBlockIndex] = useState(initialHour >= 18 ? 2 : initialHour >= 12 ? 1 : 0);
+  const block = timeBlocks[blockIndex];
+  const slots = Array.from({ length: (block.end - block.start) / 30 }, (_, index) => {
+    const minutes = block.start + index * 30;
+    const hour = Math.floor(minutes / 60);
+    const minute = String(minutes % 60).padStart(2, '0');
+    return {
+      value: `${String(hour).padStart(2, '0')}:${minute}`,
+      label: `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`,
+    };
+  });
+  return (
+    <Pile gap={7}>
+      <Row gap={5}>
+        {timeBlocks.map(({ label }, index) => (
+          <ScheduleCell key={label} label={label} selected={blockIndex === index} onPress={() => setBlockIndex(index)} />
+        ))}
+      </Row>
+      {[0, 4, 8].map((start) => (
+        <Row key={start} gap={5}>
+          {slots.slice(start, start + 4).map(({ value, label }) => (
+            <ScheduleCell key={value} label={label} selected={value === selected} onPress={() => onSelect(value)} />
+          ))}
+        </Row>
+      ))}
+      <Field label="Custom time (HH:MM, 24-hour)" value={selected} onChangeText={onSelect} autoCorrect={false}
+        maxLength={5} returnKeyType="done" onSubmitEditing={onSubmit} />
+    </Pile>
+  );
+}
+
+function ScheduleCell({ label, accessibilityLabel, selected, disabled = false, onPress }: {
+  label: string; accessibilityLabel?: string; selected: boolean; disabled?: boolean; onPress: () => void;
+}) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected, disabled }} disabled={disabled} onPress={onPress}
+      style={[styles.scheduleCell, selected && styles.selectedCell]}>
+      <Copy size={10} weight={700} tint={disabled ? '#AAA5B0' : selected ? color.white : color.navy} style={center}>{label}</Copy>
+    </Pressable>
   );
 }
 
 export function Suggestion() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   return (
     <Page>
       <Header title="Departure plan" onBack={() => router.dismissTo('/plan')} />
@@ -54,21 +220,21 @@ export function Suggestion() {
         <Tile icon={Sparkles} size={65} iconSize={30} tint="#7157D2" background="#E9E2FF" style={styles.aiOrb} />
         <Badge tone="violet" style={styles.centered}>AI RECOMMENDATION</Badge>
         <Copy accessibilityRole="header" size={28} weight={800} style={[center, { letterSpacing: -1.12, marginTop: 8 }]}>
-          Leave at <Copy size={28} weight={800} tint="#6B50C7">7:20 AM</Copy>
+          Leave at <Copy size={28} weight={800} tint="#6B50C7">{schedule.departure}</Copy>
         </Copy>
-        <Copy tint={color.muted}>For your 8:00 AM class at JUST</Copy>
+        <Copy tint={color.muted}>{`${schedule.classDate} · For your ${schedule.classTime} class at ${schedule.campus.code}`}</Copy>
       </Pile>
       <Card style={styles.timing}>
-        <Timing time="7:20" label="DEPART" /><View style={styles.timingLine} />
+        <Timing time={schedule.departure} label="DEPART" /><View style={styles.timingLine} />
         <Timing time="32 min" label="EST. TRAVEL" /><View style={styles.timingLine} />
-        <Timing time="7:52" label="ARRIVE" />
+        <Timing time={schedule.arrival} label="ARRIVE" />
       </Card>
       <Row gap={13} style={styles.probability}>
         <View style={styles.ring}>
           <Svg width={58} height={58} style={StyleSheet.absoluteFill}>
             <Circle cx={29} cy={29} r={26.5} fill={color.white} stroke="#D5E5E0" strokeWidth={5} />
-            <Circle cx={29} cy={29} r={26.5} fill="none" stroke={color.brand} strokeWidth={5}
-              strokeDasharray={[153.18, 166.5]} rotation={-90} origin="29,29" />
+            <Path d="M29 2.5 A26.5 26.5 0 1 1 29 55.5 A26.5 26.5 0 1 1 29 2.5"
+              fill="none" stroke={color.brand} strokeWidth={5} strokeDasharray={[153.18, 166.5]} />
           </Svg>
           <Copy size={14} weight={800} tint={color.brand}>92<Copy size={7} weight={800} tint={color.brand}>%</Copy></Copy>
         </View>
@@ -79,7 +245,7 @@ export function Suggestion() {
       </Row>
       <Notice icon={Info} tint="#615A72" style={{ backgroundColor: '#F6F3FF', alignItems: 'flex-start' }}>This is an AI estimate, not a guarantee. Live conditions may change.</Notice>
       <Pile gap={9} style={styles.action}>
-        <Button onPress={() => router.push('/matching')}>Accept 7:20 AM & search</Button>
+        <Button onPress={() => router.push({ pathname: '/matching', params: schedule.params })}>{`Accept ${schedule.departure} & search`}</Button>
         <Button tone="secondary" onPress={() => router.dismissTo('/plan')}>Choose another time</Button>
       </Pile>
     </Page>
@@ -97,13 +263,14 @@ type GroupFilter = (typeof groupFilters)[number];
 
 export function Matching() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   const [filter, setFilter] = useState<GroupFilter>('Girls-only');
   const [empty, setEmpty] = useState(false);
   const selectFilter = (value: GroupFilter) => {
     setFilter(value);
     setEmpty(value === 'Boys-only');
   };
-  const openGroup = () => router.push('/group');
+  const openGroup = () => router.push({ pathname: '/group', params: schedule.params });
   return (
     <Page>
       <Header title="Suggested groups" onBack={() => router.dismissTo('/suggestion')}
@@ -111,8 +278,8 @@ export function Matching() {
       <Row style={[spread, styles.routeSummary]}>
         <Row gap={8}><MapPin size={18} color={color.brand} /><TimingStop title="Student Area" detail="Pickup" /></Row>
         <ArrowRight size={18} color={color.muted} />
-        <Row gap={8}><View style={styles.campusDot}><Copy size={11} weight={800} tint={color.white}>J</Copy></View>
-          <TimingStop title="JUST" detail="Tomorrow · 7:20 AM" /></Row>
+        <Row gap={8}><View style={styles.campusDot}><Copy size={11} weight={800} tint={color.white}>{schedule.campus.code[0]}</Copy></View>
+          <TimingStop title={schedule.campus.code} detail={`${schedule.departureDate} · ${schedule.departure}`} /></Row>
       </Row>
       <Row gap={7} style={styles.filters}>
         {groupFilters.map((item) => (
@@ -138,13 +305,13 @@ export function Matching() {
       ) : (
         <Pile gap={11}>
           <Row style={spread}><Copy size={10} weight={700}>3 matches near you</Copy><Badge tone="violet" icon={Sparkles}>AI ranked</Badge></Row>
-          <Pressable accessibilityRole="button" accessibilityLabel="Best match, 7:20 AM" onPress={openGroup} style={[styles.groupCard, styles.featured]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Best match, ${schedule.departure}`} onPress={openGroup} style={[styles.groupCard, styles.featured]}>
             <Row gap={4} style={styles.bestMatch}>
               <Star size={14} color={color.brand} fill={color.brand} />
               <Copy size={8} weight={800} tint={color.brand}>BEST MATCH</Copy>
             </Row>
             <Row style={[spread, { alignItems: 'flex-start' }]}>
-              <Pile gap={7}><GroupTime time="7:20" /><Badge tone="rose">Girls-only</Badge></Pile>
+              <Pile gap={7}><GroupTime time={schedule.departure} /><Badge tone="rose">Girls-only</Badge></Pile>
               <Copy size={17} weight={800}>1.50 <Copy size={8} tint={color.muted}>JD / seat</Copy></Copy>
             </Row>
             <Row gap={4} style={styles.seats}>
@@ -162,8 +329,8 @@ export function Matching() {
               <Copy size={9} weight={800} tint="#654EBA" style={fill}>92% chance you’re on time</Copy><Info size={15} color="#654EBA" />
             </Row>
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Group, 7:30 AM" onPress={openGroup} style={[styles.groupCard, styles.compactGroup]}>
-            <Pile gap={4}><GroupTime time="7:30" /><Badge tone="slate">Any</Badge></Pile>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Group, ${schedule.alternate}`} onPress={openGroup} style={[styles.groupCard, styles.compactGroup]}>
+            <Pile gap={4}><GroupTime time={schedule.alternate} /><Badge tone="slate">Any</Badge></Pile>
             <Copy size={9} tint={color.muted} style={{ flex: 1, textAlign: 'right' }}>2/4 seats · 1.50 JD</Copy>
             <ChevronRight size={18} color={color.muted} />
           </Pressable>
@@ -181,7 +348,8 @@ function TimingStop({ title, detail }: { title: string; detail: string }) {
 }
 
 function GroupTime({ time }: { time: string }) {
-  return <Copy size={23} weight={800} tint={color.navy} style={{ letterSpacing: -0.92 }}>{time}<Copy size={10} weight={700}> AM</Copy></Copy>;
+  const [clock, period] = time.split(/\s+/);
+  return <Copy size={23} weight={800} tint={color.navy} style={{ letterSpacing: -0.92 }}>{clock}<Copy size={10} weight={700}>{` ${period}`}</Copy></Copy>;
 }
 
 function MatchFact({ icon: Icon, title }: { icon: typeof Route; title: string }) {
@@ -190,13 +358,14 @@ function MatchFact({ icon: Icon, title }: { icon: typeof Route; title: string })
 
 export function GroupDetails() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   return (
     <Page>
       <Header title="Group details" onBack={() => router.dismissTo('/matching')} />
       <View style={{ padding: 18, borderRadius: 18, backgroundColor: color.navy }}>
         <Row gap={5}><Badge tone="rose">Girls-only</Badge><Badge tone="violet" icon={Sparkles}>92% on time</Badge></Row>
-        <RouteTitle light marginTop={18} />
-        <Copy size={10} tint="#CFC5DA">Tomorrow · Departure at 7:20 AM</Copy>
+        <RouteTitle light marginTop={18} destination={schedule.campus.code} />
+        <Copy size={10} tint="#CFC5DA">{`${schedule.departureDate} · Departure at ${schedule.departure}`}</Copy>
       </View>
       <Row gap={5} style={styles.seatSummary}>
         <SeatStat number="3" label="reserved" /><View style={styles.seatDivider} />
@@ -225,15 +394,17 @@ export function GroupDetails() {
         <PolicyRow icon={X} label="Less than 12 hours: " outcome="no refund" />
         <PolicyRow icon={LockKeyhole} label="After trip starts: cancellation unavailable" />
       </Card>
-      <Button onPress={() => router.push('/summary')} style={styles.action}>Book & prepay · 1.50 JD</Button>
+      <Button onPress={() => router.push({ pathname: '/summary', params: schedule.params })} style={styles.action}>Book & prepay · 1.50 JD</Button>
     </Page>
   );
 }
 
-export function RouteTitle({ light = false, marginTop = 10 }: { light?: boolean; marginTop?: number }) {
+export function RouteTitle({ light = false, marginTop = 10, destination }: {
+  light?: boolean; marginTop?: number; destination: string;
+}) {
   const tint = light ? color.white : color.navy;
   return <Row gap={8} style={{ marginTop, marginBottom: 6, flexWrap: 'wrap' }}>
-    <Copy size={17} weight={800} tint={tint}>Student Area</Copy><ArrowRight size={19} color={tint} /><Copy size={17} weight={800} tint={tint}>JUST</Copy>
+    <Copy size={17} weight={800} tint={tint}>Student Area</Copy><ArrowRight size={19} color={tint} /><Copy size={17} weight={800} tint={tint}>{destination}</Copy>
   </Row>;
 }
 
@@ -254,6 +425,10 @@ function PolicyRow({ icon: Icon, label, outcome }: { icon: typeof Check; label: 
 }
 
 const styles = StyleSheet.create({
+  campusOption: { minHeight: 56, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  activeCampus: { backgroundColor: color.pink },
+  scheduleCell: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2, backgroundColor: color.soft, borderRadius: 9 },
+  selectedCell: { backgroundColor: color.brand },
   inputCard: { padding: 0, borderRadius: 17, marginVertical: 15 },
   divider: { borderBottomWidth: 1, borderBottomColor: color.line },
   map: { height: 176, borderRadius: 18, overflow: 'hidden', backgroundColor: '#E8EFEA' },

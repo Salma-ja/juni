@@ -1,1 +1,1 @@
-export { Register as default } from '@/features/access';
+export { default } from '@/features/registration';

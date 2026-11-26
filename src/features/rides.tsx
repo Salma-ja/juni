@@ -14,6 +14,7 @@ import {
   SheetHandle, SheetHeading, spread, TextLink, Tile,
 } from '@/components/ui';
 import { color, shadow } from '@/theme';
+import { useRideSchedule } from '@/features/rideSchedule';
 
 const rideTabs = ['Upcoming', 'Active', 'Past'] as const;
 type RideTab = (typeof rideTabs)[number];
@@ -89,12 +90,13 @@ function PastRide({ date, route, detail, cancelled = false }: { date: string; ro
 
 export function TripDetails() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   return (
     <Page>
       <Header title="Trip details" onBack={() => router.dismissTo('/rides')} />
       <Row style={[spread, { marginBottom: 12 }]}>
         <Row gap={5}><View style={styles.statusDot} /><Eyebrow size={8}>CONFIRMED</Eyebrow></Row>
-        <Copy size={9} weight={800}>Tomorrow · 7:20 AM</Copy>
+        <Copy size={9} weight={800}>{`${schedule.departureDate} · ${schedule.departure}`}</Copy>
       </Row>
       <Row gap={12} style={styles.captainCard}>
         <CaptainPhoto style={styles.captainPhoto} />
@@ -108,8 +110,9 @@ export function TripDetails() {
         <IconButton icon={Phone} label="Call Captain Omar" tint="#FF83C1" style={styles.darkPhone} />
       </Row>
       <RouteCard style={styles.journey}
-        start={{ label: 'PICKUP · 7:20 AM', title: 'Student Area, Irbid', detail: 'Near Al-Husn Road' }}
-        end={{ label: 'ARRIVAL · ETA 7:52 AM', title: 'JUST Main Campus', detail: 'South Gate' }}
+        start={{ label: `PICKUP · ${schedule.departure}`, title: 'Student Area, Irbid', detail: 'Near Al-Husn Road' }}
+        end={{ label: `ARRIVAL · ETA ${schedule.arrival}`, title: schedule.campus.label,
+          detail: schedule.campus.id === 'just' ? 'South Gate' : 'University destination' }}
       />
       <Row gap={10}>
         <TripStat icon={Clock3} title="TRIP TIME" detail="32 min" />
@@ -126,8 +129,8 @@ export function TripDetails() {
         ))}
       </Row>
       <Row gap={9} style={{ marginTop: 22 }}>
-        <Button icon={Navigation} style={styles.tripAction} size={11} onPress={() => router.push('/tracking')}>Track live</Button>
-        <Button tone="secondary" icon={ShieldCheck} style={styles.tripAction} size={11} onPress={() => router.push('/safety')}>Safety & share</Button>
+        <Button icon={Navigation} style={styles.tripAction} size={11} onPress={() => router.push({ pathname: '/tracking', params: schedule.params })}>Track live</Button>
+        <Button tone="secondary" icon={ShieldCheck} style={styles.tripAction} size={11} onPress={() => router.push({ pathname: '/safety', params: schedule.params })}>Safety & share</Button>
       </Row>
     </Page>
   );
@@ -144,6 +147,7 @@ function TripStat({ icon: Icon, title, detail }: { icon: typeof Clock3; title: s
 
 export function Tracking() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   const { height } = useWindowDimensions();
   const { top, bottom } = useSafeAreaInsets();
   return (
@@ -161,8 +165,8 @@ export function Tracking() {
         <Badge tone="violet" icon={Zap} style={[styles.mapBadge, { top: top + 22 }]}>Simulated GPS tracking</Badge>
         <View style={styles.mapStart}><MapPin size={24} color={color.brand} fill={color.brand} /></View>
         <View style={styles.carMarker}><Car size={21} color={color.white} /></View>
-        <View style={styles.mapEnd}><Copy weight={800} tint={color.white}>J</Copy></View>
-        <Copy weight={800} size={8} style={styles.campusMapLabel}>JUST Campus</Copy>
+        <View style={styles.mapEnd}><Copy weight={800} tint={color.white}>{schedule.campus.code[0]}</Copy></View>
+        <Copy weight={800} size={8} style={styles.campusMapLabel}>{schedule.campus.label}</Copy>
       </LinearGradient>
       <View style={[styles.trackingSheet, { minHeight: height * 0.38, paddingBottom: 25 + bottom }]}>
         <SheetHandle />
@@ -172,9 +176,9 @@ export function Tracking() {
           <Badge style={{ alignSelf: 'center' }}>On time</Badge>
         </Row>
         <View style={{ marginVertical: 14 }}><ProgressBar value={58} /></View>
-        <CaptainMini label="CAPTAIN OMAR · 21-84567" title="Heading to JUST South Gate"
+        <CaptainMini label="CAPTAIN OMAR · 21-84567" title={`Heading to ${schedule.campus.label}`}
           accessory={<IconButton icon={Phone} label="Call Captain Omar" tint={color.brand} style={styles.lightPhone} size={18} />} />
-        <Button tone="secondary" icon={ShieldCheck} style={{ marginTop: 12 }} onPress={() => router.push('/safety')}>Safety & share</Button>
+        <Button tone="secondary" icon={ShieldCheck} style={{ marginTop: 12 }} onPress={() => router.push({ pathname: '/safety', params: schedule.params })}>Safety & share</Button>
       </View>
     </Page>
   );
@@ -182,6 +186,7 @@ export function Tracking() {
 
 export function Safety() {
   const router = useRouter();
+  const schedule = useRideSchedule();
   const [copied, setCopied] = useState(false);
   const [sos, setSos] = useState<'idle' | 'confirm' | 'sent'>('idle');
   const closeSos = () => setSos('idle');
@@ -201,8 +206,8 @@ export function Safety() {
           </Pile>
         </Row>
         <Pile gap={4} style={styles.sharePreview}>
-          <Copy size={10} weight={700}>Salma’s JUNI trip to JUST</Copy>
-          <Copy size={8} tint={color.muted}>ETA 7:52 AM · Captain & vehicle only</Copy>
+          <Copy size={10} weight={700}>{`Salma’s JUNI trip to ${schedule.campus.code}`}</Copy>
+          <Copy size={8} tint={color.muted}>{`ETA ${schedule.arrival} · Captain & vehicle only`}</Copy>
         </Pile>
         <Button tone="secondary" icon={copied ? Check : CopyIcon} onPress={() => setCopied(true)}>
           {copied ? 'Secure link copied' : 'Copy secure share link'}

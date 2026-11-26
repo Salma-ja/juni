@@ -237,10 +237,11 @@ export function Avatar({ name, index = 0, size = 36 }: { name: string; index?: n
   );
 }
 
-export function RouteCard({ start, end, style }: {
+export function RouteCard({ start, end, style, onEndPress }: {
   start: { label: string; title: string; detail: string };
   end: { label: string; title: string; detail: string };
   style?: StyleProp<ViewStyle>;
+  onEndPress?: () => void;
 }) {
   return (
     <Row gap={11} style={[styles.routeCard, style]}>
@@ -252,15 +253,24 @@ export function RouteCard({ start, end, style }: {
         <View style={styles.routeEnd} />
       </View>
       <Pile gap={17} style={styles.grow}>
-        {[start, end].map((stop) => (
-          <Pile key={stop.label} gap={4}>
-            <Eyebrow tint={color.muted} size={8}>{stop.label}</Eyebrow>
-            <Copy tint={color.navy} size={13} weight={800}>{stop.title}</Copy>
-            <Copy tint={color.muted} size={10}>{stop.detail}</Copy>
-          </Pile>
-        ))}
+        <RouteStop stop={start} />
+        {onEndPress ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={`Change destination, ${end.title}`} onPress={onEndPress}>
+            <Row><View style={styles.grow}><RouteStop stop={end} /></View><ChevronRight size={18} color={color.muted} /></Row>
+          </Pressable>
+        ) : <RouteStop stop={end} />}
       </Pile>
     </Row>
+  );
+}
+
+function RouteStop({ stop }: { stop: { label: string; title: string; detail: string } }) {
+  return (
+    <Pile gap={4}>
+      <Eyebrow tint={color.muted} size={8}>{stop.label}</Eyebrow>
+      <Copy tint={color.navy} size={13} weight={800}>{stop.title}</Copy>
+      <Copy tint={color.muted} size={10}>{stop.detail}</Copy>
+    </Pile>
   );
 }
 
@@ -313,7 +323,8 @@ export function BottomSheet({ children, onClose }: { children: ReactNode; onClos
           transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }],
         }]}>
           <SafeAreaView edges={['bottom']} style={styles.sheet}>
-            <ScrollView bounces={false} showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent}>
+            <ScrollView bounces={false} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.sheetContent}>
               {children}
             </ScrollView>
           </SafeAreaView>
