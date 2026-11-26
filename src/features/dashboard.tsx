@@ -11,14 +11,14 @@ import { authClient, studentName, useAuth } from '@/features/authSession';
 
 export function HomeScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, demoActive } = useAuth();
   return (
     <Page>
       <Row style={styles.homeHeader}>
         <Pile gap={7} style={fill}>
           <Eyebrow tint={color.muted} size={9}>MONDAY, 14 APRIL</Eyebrow>
           <Copy accessibilityRole="header" size={28} weight={800} style={{ letterSpacing: -1.4 }}>{`Hi, ${studentName(user).split(/\s+/)[0]}`}</Copy>
-          <Badge icon={BadgeCheck} iconSize={14}>Verified student</Badge>
+          <Badge icon={BadgeCheck} iconSize={14}>{demoActive ? 'Demo mode' : 'Verified student'}</Badge>
         </Pile>
         <Pressable accessibilityRole="button" accessibilityLabel="240 points" onPress={() => router.navigate('/points')} style={styles.pointsPill}>
           <Coins size={17} color="#BD861D" />
@@ -83,7 +83,7 @@ export function HomeScreen() {
 
 export function Profile() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, demoActive, exitDemo } = useAuth();
   const name = studentName(user);
   const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
   const [logoutError, setLogoutError] = useState('');
@@ -91,6 +91,10 @@ export function Profile() {
   const inactive = () => {};
 
   async function logOut() {
+    if (demoActive) {
+      exitDemo();
+      return;
+    }
     if (!authClient || signingOut) return;
     setSigningOut(true);
     setLogoutError('');
@@ -113,12 +117,12 @@ export function Profile() {
         </GradientCard>
         <Copy accessibilityRole="header" size={20} weight={800} style={center}>{name}</Copy>
         <Copy size={9} tint={color.muted}>{user?.email}</Copy>
-        <Badge icon={BadgeCheck} iconSize={14} style={{ alignSelf: 'center' }}>Verified student</Badge>
+        <Badge icon={BadgeCheck} iconSize={14} style={{ alignSelf: 'center' }}>{demoActive ? 'Demo mode' : 'Verified student'}</Badge>
       </Pile>
-      <Pile gap={7} style={styles.profileSection}>
+      {!demoActive && <Pile gap={7} style={styles.profileSection}>
         <Eyebrow>UNIVERSITY</Eyebrow>
         <View style={styles.profileRows}><InfoRow icon={ShieldCheck} label="Verified university email" value={user?.email ?? ''} /></View>
-      </Pile>
+      </Pile>}
       <Pile gap={7} style={styles.profileSection}>
         <Eyebrow>RIDE PREFERENCES</Eyebrow>
         <View style={styles.profileRows}>
@@ -133,7 +137,7 @@ export function Profile() {
           <InfoRow icon={Coins} label="JUNI Points" value="240 points" onPress={() => router.navigate('/points')} />
         </View>
       </Pile>
-      {logoutError && <Copy accessibilityRole="alert" tint={color.danger}>{logoutError}</Copy>}
+      {!!logoutError && <Copy accessibilityRole="alert" tint={color.danger}>{logoutError}</Copy>}
       <TextLink tint="#BC4242" size={11} style={styles.signout}
         onPress={logOut}>{signingOut ? 'Logging out…' : 'Log out'}</TextLink>
     </Page>

@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Polygon, Rect } from 'react-native-svg';
 import { BottomSheet, Button, Copy, Pile, Row, TextLink } from '@/components/ui';
 import { authClient, displayStudentDomains, isVerifiedStudent, normalizeDigits, normalizePhone, universityEmail, useAuth } from '@/features/authSession';
+import { DemoAccess } from '@/features/access';
 import { font, shadow } from '@/theme';
 
 const pink = '#E90076';
@@ -224,6 +225,7 @@ export default function Register() {
               <Row gap={4} style={styles.login}>
                 <Copy size={13} tint={muted}>Already have an account?</Copy><TextLink tint={pink} onPress={login} size={13}>Log in</TextLink>
               </Row>
+              <DemoAccess />
             </Pile>
           </>
         ) : (
@@ -260,13 +262,15 @@ export default function Register() {
 
 function JordanFlag() {
   return (
-    <Svg width={22} height={15} viewBox="0 0 22 15" accessible={false}>
-      <Rect width={22} height={15} fill="#FFF" />
-      <Rect width={22} height={5} fill="#171717" />
-      <Rect y={10} width={22} height={5} fill="#007A3D" />
-      <Polygon points="0,0 11,7.5 0,15" fill="#CE1126" />
-      <Polygon points="4,5.2 4.5,6.5 5.9,6 5.2,7.3 6.1,8.3 4.8,8.1 4,9.4 3.5,8.1 2.1,8.3 3,7.3 2.3,6 3.6,6.5" fill="#FFF" />
-    </Svg>
+    <View aria-hidden accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Svg width={22} height={15} viewBox="0 0 22 15">
+        <Rect width={22} height={15} fill="#FFF" />
+        <Rect width={22} height={5} fill="#171717" />
+        <Rect y={10} width={22} height={5} fill="#007A3D" />
+        <Polygon points="0,0 11,7.5 0,15" fill="#CE1126" />
+        <Polygon points="4,5.2 4.5,6.5 5.9,6 5.2,7.3 6.1,8.3 4.8,8.1 4,9.4 3.5,8.1 2.1,8.3 3,7.3 2.3,6 3.6,6.5" fill="#FFF" />
+      </Svg>
+    </View>
   );
 }
 

@@ -7,27 +7,21 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Platform, StyleSheet, View } from 'react-native';
 import { color } from '@/theme';
-import { AuthProvider, isVerifiedStudent, useAuth } from '@/features/authSession';
-
-const studentRoutes = [
-  '(tabs)', 'plan', 'suggestion', 'matching', 'group', 'summary', 'payment',
-  'status', 'trip', 'tracking', 'safety', 'rules',
-] as const;
+import { AuthProvider, useAuth } from '@/features/authSession';
 
 function AppStack() {
-  const { user, ready } = useAuth();
-  const verified = isVerifiedStudent(user);
+  const { canEnter, ready } = useAuth();
   if (!ready) return null;
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'none', contentStyle: styles.screen }}>
       <Stack.Screen name="index" />
-      <Stack.Protected guard={!verified}>
+      <Stack.Protected guard={!canEnter}>
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
         <Stack.Screen name="verification" />
       </Stack.Protected>
-      <Stack.Protected guard={verified}>
-        {studentRoutes.map((name) => <Stack.Screen key={name} name={name} />)}
+      <Stack.Protected guard={canEnter}>
+        <Stack.Screen name="(tabs)" />
       </Stack.Protected>
     </Stack>
   );

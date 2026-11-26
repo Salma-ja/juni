@@ -89,7 +89,7 @@ export function Header({ title, onBack, action, eyebrow }: {
     <Row gap={11} style={styles.header}>
       {onBack ? <IconButton icon={ArrowLeft} label="Go back" onPress={onBack} size={21} /> : <Logo compact />}
       <View style={styles.grow}>
-        {eyebrow && <Eyebrow tint={color.muted} size={9}>{eyebrow}</Eyebrow>}
+        {!!eyebrow && <Eyebrow tint={color.muted} size={9}>{eyebrow}</Eyebrow>}
         <Copy accessibilityRole="header" size={18} weight={800} style={{ letterSpacing: -0.45 }}>{title}</Copy>
       </View>
       <View style={styles.headerAction}>{action}</View>
@@ -146,7 +146,7 @@ export function Badge({ children, tone = 'green', icon: Icon, iconSize = 13, sty
   return (
     <Row gap={4} style={[styles.badge, { backgroundColor }, style]}>
       {Icon && <Icon color={tint} size={iconSize} />}
-      {children && <Copy size={9} weight={800} tint={tint} style={styles.badgeText}>{children}</Copy>}
+      {!!children && <Copy size={9} weight={800} tint={tint} style={styles.badgeText}>{children}</Copy>}
     </Row>
   );
 }
@@ -220,7 +220,7 @@ export function SectionHeading({ title, note, onPress }: { title: string; note?:
   return (
     <Row style={styles.sectionHeading}>
       <Copy accessibilityRole="header" weight={800} size={15}>{title}</Copy>
-      {note && (onPress
+      {!!note && (onPress
         ? <TextLink onPress={onPress} size={10}>{note}</TextLink>
         : <Copy size={10} weight={700} tint={color.brand}>{note}</Copy>)}
     </Row>

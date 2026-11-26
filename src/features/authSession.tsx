@@ -17,7 +17,8 @@ export const authClient = url && publicKey ? createClient(url, publicKey, {
   },
 }) : null;
 
-const configuredDomains: string = process.env.EXPO_PUBLIC_JUNI_STUDENT_EMAIL_DOMAINS ?? 'ses.yu.edu.jo';
+const configuredDomains: string = process.env.EXPO_PUBLIC_JUNI_STUDENT_EMAIL_DOMAINS ??
+  'just.edu.jo,ses.yu.edu.jo,inu.edu.jo';
 const studentDomains = new Set(configuredDomains
   .split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
 
@@ -47,14 +48,26 @@ export function isVerifiedStudent(user: User | null) {
   return Boolean(user?.phone_confirmed_at && user.email_confirmed_at && universityEmail(user.email ?? ''));
 }
 
-const AuthContext = createContext<{ user: User | null; ready: boolean; signedOut: boolean }>({
-  user: null, ready: false, signedOut: false,
-});
+export const demoAvailable = __DEV__ && !authClient;
+
+type AuthState = {
+  user: User | null;
+  ready: boolean;
+  signedOut: boolean;
+  demoActive: boolean;
+  canEnter: boolean;
+  enterDemo: () => void;
+  exitDemo: () => void;
+};
+
+const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(!authClient);
   const [signedOut, setSignedOut] = useState(false);
+  const [demo, setDemo] = useState(false);
+  const demoActive = demoAvailable && demo;
 
   useEffect(() => {
     const client = authClient;
@@ -81,11 +94,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  return <AuthContext.Provider value={{ user, ready, signedOut }}>{children}</AuthContext.Provider>;
+  const value = {
+    user, ready, signedOut, demoActive,
+    canEnter: demoActive || isVerifiedStudent(user),
+    enterDemo: () => { if (demoAvailable) { setSignedOut(false); setDemo(true); } },
+    exitDemo: () => { setDemo(false); setSignedOut(true); },
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
-  return useContext(AuthContext);
+  const auth = useContext(AuthContext);
+  if (!auth) throw new Error('AuthProvider is required.');
+  return auth;
 }
 
 export function studentName(user: User | null) {

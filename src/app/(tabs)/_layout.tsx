@@ -11,7 +11,7 @@ function tabIcon(Icon: LucideIcon) {
 export default function TabLayout() {
   const { bottom } = useSafeAreaInsets();
   return (
-    <Tabs initialRouteName="home" backBehavior="initialRoute" screenOptions={{
+    <Tabs initialRouteName="(home)" backBehavior="initialRoute" screenOptions={{
       headerShown: false,
       tabBarActiveTintColor: color.brand,
       tabBarInactiveTintColor: '#82908F',
@@ -20,9 +20,10 @@ export default function TabLayout() {
       tabBarItemStyle: styles.tab,
       tabBarStyle: [styles.bar, { height: spacing.tabBar + bottom }],
       tabBarHideOnKeyboard: true,
+      popToTopOnBlur: false,
     }}>
-      <Tabs.Screen name="home" options={{ title: 'Home', tabBarIcon: tabIcon(Home) }} />
-      <Tabs.Screen name="rides" options={{ title: 'My Rides', tabBarIcon: tabIcon(Car) }} />
+      <Tabs.Screen name="(home)" options={{ title: 'Home', tabBarIcon: tabIcon(Home) }} />
+      <Tabs.Screen name="(rides)" options={{ title: 'My Rides', tabBarIcon: tabIcon(Car) }} />
       <Tabs.Screen name="points" options={{ title: 'Points', tabBarIcon: tabIcon(Coins) }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: tabIcon(CircleUserRound) }} />
     </Tabs>

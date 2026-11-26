@@ -8,20 +8,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, center, Copy, Eyebrow, Field, fill, Header, Logo, Notice, Page, Pile, Row, TextLink, Tile } from '@/components/ui';
 import { color } from '@/theme';
 
-import { authClient, displayStudentDomains, isVerifiedStudent, normalizeDigits, normalizePhone, universityEmail, useAuth } from '@/features/authSession';
+import { authClient, demoAvailable, displayStudentDomains, isVerifiedStudent, normalizeDigits, normalizePhone, universityEmail, useAuth } from '@/features/authSession';
 
 const unavailable = 'Verification is unavailable until messaging is configured.';
 
 export function Splash() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { ready, user, signedOut } = useAuth();
-  const destination = isVerifiedStudent(user) ? '/home' : user?.phone_confirmed_at ? '/verification' : '/login';
+  const { ready, user, signedOut, canEnter } = useAuth();
+  const destination = canEnter ? '/home' : user?.phone_confirmed_at ? '/verification' : '/login';
   useEffect(() => {
     if (!ready) return;
-    const timer = setTimeout(() => router.replace(destination), user || signedOut ? 0 : 3200);
+    const timer = setTimeout(() => router.replace(destination), canEnter || user || signedOut ? 0 : 3200);
     return () => clearTimeout(timer);
-  }, [destination, ready, router, signedOut, user]);
+  }, [canEnter, destination, ready, router, signedOut, user]);
 
   return (
     <LinearGradient colors={['#3A2758', '#2B2142', '#201731']} locations={[0, 0.58, 1]}
@@ -121,12 +121,24 @@ export function Login() {
         )}
         <AuthFeedback error={error} />
         <Button disabled={busy} onPress={submit}>{busy ? 'Please wait…' : sentTo ? 'Verify SMS code' : 'Send SMS code'}</Button>
+        <DemoAccess />
       </Pile>
       <Row gap={5} style={styles.authSwitch}>
         <Copy size={13} tint={color.muted}>New to JUNI?</Copy>
         <TextLink onPress={() => { if (!busy) router.push('/register'); }} size={13}>Create account</TextLink>
       </Row>
     </Page>
+  );
+}
+
+export function DemoAccess() {
+  const { enterDemo } = useAuth();
+  if (!demoAvailable) return null;
+  return (
+    <Pile gap={6}>
+      <Button tone="secondary" onPress={enterDemo}>Continue to demo</Button>
+      <Copy size={11} tint={color.muted} style={center}>Local preview · no account or verification code needed</Copy>
+    </Pile>
   );
 }
 
