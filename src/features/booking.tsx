@@ -1,24 +1,28 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { AlertTriangle, Check, CheckCircle2, Clock3, CreditCard, Info, LockKeyhole, X, Zap } from 'lucide-react-native';
-import type { LucideIcon } from 'lucide-react-native';
+import {
+  AlertTriangle, Banknote, Check, Clock3, CreditCard, Gift, LockKeyhole, ShieldCheck, Wallet, X,
+} from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import {
-  Badge, Button, Card, center, CheckDot, Copy, Eyebrow, fill, Header, IconButton,
-  Notice, Page, Pile, Row, spread,
+  Badge, Button, Card, center, Copy, Eyebrow, fill, Header, IconButton, Notice, Page, Pile, PulseDot, Row,
+  ScalePressable, spread, Tile,
 } from '@/components/ui';
-import { RouteTitle } from '@/features/planning';
-import { useAuth } from '@/features/authSession';
 import {
-  booking as loadBooking, hold as loadHold, pay, startCheckout, type BookingDetail, type Checkout, type Hold, type PayResult,
+  booking as loadBooking, hold as loadHold, pay, startCheckout, type BookingDetail, type Checkout,
+  type Hold, type PayResult,
 } from '@/data/api';
 import { errorCopy } from '@/data/errors';
 import { formatCountdown, formatDate, formatFils, formatTime } from '@/data/format';
 import { useRefData } from '@/data/refdata';
+import { LivePickupWidget, NotificationBell, useLiveUpdates } from '@/features/liveUpdates';
+import { payMethodLabel, readPayMethod, rememberPayMethod, type PayMethod } from '@/features/payMethod';
 import { color } from '@/theme';
 
+const NATIVE_DRIVER = Platform.OS !== 'web';
+
 /** Seconds left on a hold, counted from the server's clock so a demo clock offset does not skew it. */
-function useCountdown(expiresAt?: string, appNow?: string) {
+export function useCountdown(expiresAt?: string, appNow?: string) {
   const [remaining, setRemaining] = useState<number | null>(null);
   useEffect(() => {
     if (!expiresAt || !appNow) return;
@@ -57,8 +61,12 @@ export function BookingSummary() {
     return (
       <Page>
         <Header title="Review booking" onBack={back} />
-        <Notice icon={AlertTriangle} tint="#A63737" style={{ backgroundColor: '#FFEFEE' }}>{errorCopy(code)}</Notice>
-        <Button onPress={() => router.dismissTo({ pathname: '/matching', params: { requestId } })}>See other groups</Button>
+        <Notice icon={AlertTriangle} tint={color.danger} style={{ backgroundColor: color.dangerSoft }}>
+          {errorCopy(code)}
+        </Notice>
+        <Button style={{ marginTop: 16 }} onPress={() => router.dismissTo({ pathname: '/matching', params: { requestId } })}>
+          See other groups
+        </Button>
       </Page>
     );
   }
@@ -66,65 +74,88 @@ export function BookingSummary() {
     return (
       <Page>
         <Header title="Review booking" onBack={back} />
-        <Copy tint={color.muted}>Holding your seat…</Copy>
+        <Card style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
+          <PulseDot tint={color.brand} size={8} />
+          <Copy tint={color.muted}>Locking your seat for 5 minutes…</Copy>
+        </Card>
       </Page>
     );
   }
-  const checks = [
-    ['Student verified', 'Verification confirmed'],
-    ['Seat held for you', `Held for 5 minutes`],
-    ['Preference matched', 'This group accepts your profile'],
-    ['Fare locked', `${formatFils(checkout.fare_fils)} · fixed for this booking`],
-  ] as const;
-  return (
-    <Page>
-      <Header title="Review booking" onBack={back} />
-      <View style={styles.summaryRoute}>
-        <Copy size={9} weight={700} tint="#F2A3CC">{formatDate(checkout.departure_at)}</Copy>
-        <RouteTitle light pickup={ref.pickup(checkout.pickup_area_id)?.name ?? ''} destination={ref.campus(checkout.campus_id)?.code ?? ''} />
-        <Copy size={10} tint="#CFC5DA">{`Departs ${formatTime(checkout.departure_at)} · Your pickup ${formatTime(checkout.pickup_at)}`}</Copy>
-      </View>
-      <Card style={styles.ruleChecks}>
-        <Eyebrow>AUTOMATIC RULE CHECK</Eyebrow>
-        {checks.map(([label, detail]) => (
-          <Row key={label} gap={10}>
-            <View style={styles.ruleIcon}><Check size={11} color={color.white} /></View>
-            <Pile gap={4} style={fill}>
-              <Copy size={11} weight={800}>{label}</Copy>
-              <Copy size={8} tint={color.muted}>{detail}</Copy>
-            </Pile>
-          </Row>
-        ))}
-      </Card>
-      <Card style={styles.price}>
-        <Copy size={13} weight={800}>Payment summary</Copy>
-        <SummaryLine label="Seat fare" value={formatFils(checkout.fare_fils)} />
-        <SummaryLine label="Service fee" value="0.00 JD" />
-        <View style={styles.priceDivider} />
-        <SummaryLine label="Total prepaid" value={formatFils(checkout.fare_fils)} total />
-      </Card>
-      {checkout.inside_12h && (
-        <Notice icon={AlertTriangle} tint="#735C23" style={{ backgroundColor: '#FFF7E4' }}>
-          No refund if cancelled. Pickup is in less than 12 hours.
-        </Notice>
-      )}
-      <Notice icon={LockKeyhole} tint="#557068" style={styles.secureNote}>
-        {expired ? errorCopy('HOLD_EXPIRED') : `Your seat is held for ${formatCountdown(remaining ?? 300)}`}
-      </Notice>
-      {expired
-        ? <Button style={styles.sticky} onPress={back}>Start again</Button>
-        : <Button icon={CreditCard} style={styles.sticky}
-            onPress={() => router.push({ pathname: '/payment', params: { holdId: checkout.hold_id, requestId } })}>Confirm payment</Button>}
-    </Page>
-  );
-}
 
-function SummaryLine({ label, value, total = false }: { label: string; value: string; total?: boolean }) {
+  const pickupName = ref.pickup(checkout.pickup_area_id)?.name ?? 'Pickup';
+  const campusCode = ref.campus(checkout.campus_id)?.code ?? 'Campus';
+  const timerTint = expired ? color.danger : remaining !== null && remaining < 60 ? color.amber : color.muted;
+
   return (
-    <Row style={spread}>
-      <Copy size={total ? 13 : 10} tint={total ? color.ink : color.muted}>{label}</Copy>
-      <Copy size={total ? 13 : 10} weight={800}>{value}</Copy>
-    </Row>
+    <Page
+      footer={
+        <Pile gap={10}>
+          <Row gap={6} style={{ justifyContent: 'center' }}>
+            <Clock3 size={14} color={timerTint} />
+            <Copy size={13} weight={600} tint={timerTint}>
+              {expired ? 'Hold expired' : `Seat held for ${formatCountdown(remaining ?? 300)}`}
+            </Copy>
+          </Row>
+          {expired ? (
+            <Button onPress={back}>Start again</Button>
+          ) : (
+            <Button
+              trailingArrow
+              onPress={() => router.push({ pathname: '/payment', params: { holdId: checkout.hold_id, requestId } })}
+            >
+              {`Pay ${formatFils(checkout.fare_fils)}`}
+            </Button>
+          )}
+        </Pile>
+      }
+    >
+      <Header title="Review booking" subtitle={formatDate(checkout.departure_at)} onBack={back} />
+
+      <View style={styles.tripCard}>
+        <Row gap={12}>
+          <View style={styles.tripRail}>
+            <View style={styles.tripDotFrom} />
+            <View style={styles.tripLine} />
+            <View style={styles.tripDotTo} />
+          </View>
+          <Pile gap={18} style={fill}>
+            <Row style={spread}>
+              <Copy size={16} weight={800} tint={color.navy} style={fill} numberOfLines={1}>{pickupName}</Copy>
+              <Copy size={18} weight={800} tint={color.navy}>{formatTime(checkout.pickup_at)}</Copy>
+            </Row>
+            <Row style={spread}>
+              <Copy size={16} weight={800} tint={color.navy} style={fill}>{campusCode}</Copy>
+              <Copy size={13} weight={600} tint={color.muted}>Campus gate</Copy>
+            </Row>
+          </Pile>
+        </Row>
+      </View>
+
+      <View style={styles.priceBlock}>
+        <Row style={spread}>
+          <Copy size={14} tint={color.muted}>Your seat</Copy>
+          <Copy size={14} weight={700} tint={color.navy}>{formatFils(checkout.fare_fils)}</Copy>
+        </Row>
+        <Row style={spread}>
+          <Copy size={14} tint={color.muted}>Fees</Copy>
+          <Copy size={14} weight={700} tint={color.navy}>0.00 JD</Copy>
+        </Row>
+        <View style={styles.priceDivider} />
+        <Row style={spread}>
+          <Copy size={16} weight={800} tint={color.navy}>Total</Copy>
+          <Copy size={22} weight={800} tint={color.navy}>{formatFils(checkout.fare_fils)}</Copy>
+        </Row>
+      </View>
+
+      <Row gap={6} style={{ marginTop: 14 }}>
+        <ShieldCheck size={14} color={color.muted} />
+        <Copy size={12} tint={color.muted} style={fill}>
+          {checkout.inside_12h
+            ? 'Under 12h to pickup — no refund if you cancel'
+            : 'Price locked · Free cancel up to 12h before pickup'}
+        </Copy>
+      </Row>
+    </Page>
   );
 }
 
@@ -132,6 +163,7 @@ export function Payment() {
   const router = useRouter();
   const { holdId, requestId } = useLocalSearchParams<{ holdId: string; requestId: string }>();
   const ref = useRefData();
+  const { refreshLive } = useLiveUpdates();
   const keys = useRef({ success: globalThis.crypto.randomUUID(), failed: globalThis.crypto.randomUUID() });
   const [data, setData] = useState<Hold | null>(null);
   const [loadCode, setLoadCode] = useState('');
@@ -139,6 +171,7 @@ export function Payment() {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
+  const [method] = useState<PayMethod>('cash');
   const remaining = useCountdown(data?.expires_at, data?.app_now);
   const expired = !!data && (!data.active || (remaining !== null && remaining <= 0));
 
@@ -155,12 +188,17 @@ export function Payment() {
     if (busy || expired || !data) return;
     setBusy(true);
     setCode('');
-    const res = await pay(holdId, outcome, keys.current[outcome]);
+    const res = await pay(holdId, outcome, keys.current[outcome], method === 'cash' ? 'cash' : 'cash');
     setBusy(false);
     if (!res.ok) { setCode(res.code); return; }
     setResult(res.data);
     if (res.data.outcome === 'success' && res.data.booking_id) {
-      router.replace({ pathname: '/status', params: { bookingId: res.data.booking_id } });
+      await rememberPayMethod(res.data.booking_id, 'cash');
+      await refreshLive();
+      router.replace({
+        pathname: '/status',
+        params: { bookingId: res.data.booking_id, bonusPts: String(res.data.points_awarded ?? 0) },
+      });
     } else {
       setFailed(true);
     }
@@ -168,184 +206,375 @@ export function Payment() {
 
   const startAgain = () => router.dismissTo({ pathname: '/group', params: { groupId: data?.group_id ?? '', requestId } });
   return (
-    <Page>
-      <Header title="Payment simulation" onBack={() => router.back()} />
-      <DemoBanner icon={Zap} title="MVP demo mode" detail="No real money will be charged." />
-      {!!loadCode && <Copy tint={color.danger}>{errorCopy(loadCode)}</Copy>}
+    <Page
+      footer={
+        failed || expired ? (
+          <Button onPress={startAgain}>Return to group</Button>
+        ) : (
+          <Button icon={Banknote} disabled={busy || !data} onPress={() => submit('success')} trailingArrow>
+            {busy ? 'Confirming seat…' : `Confirm seat · ${data ? formatFils(data.fare_fils) : ''} Cash`}
+          </Button>
+        )
+      }
+    >
+      <Header title="Confirm seat" subtitle="Jeeny Campus Pilot Checkout" onBack={() => router.back()} />
+
+      {!!loadCode && (
+        <Notice icon={AlertTriangle} tint={color.danger} style={{ backgroundColor: color.dangerSoft }}>
+          {errorCopy(loadCode)}
+        </Notice>
+      )}
+
       {data && (
-        <>
-          <Pile gap={8} style={styles.paymentAmount}>
-            <Eyebrow size={9} tint={color.muted}>AMOUNT TO PAY</Eyebrow>
-            <Copy size={42} weight={800} style={{ letterSpacing: -2.1 }}>
-              {formatFils(data.fare_fils, false)} <Copy size={14} weight={800}>JD</Copy>
+        <Card style={styles.amountHero}>
+          <Eyebrow tint={color.muted}>EXACT GATE FARE</Eyebrow>
+          <Row gap={6} style={{ alignItems: 'baseline', marginTop: 6 }}>
+            <Copy size={42} weight={800} tint={color.navy} style={{ letterSpacing: -1.8 }}>
+              {formatFils(data.fare_fils, false)}
             </Copy>
-            <Copy size={10} tint={color.muted}>{`One seat · ${formatDate(data.departure_at)} at ${formatTime(data.departure_at)}`}</Copy>
-            <Copy size={10} tint={color.muted}>{ref.campus(data.campus_id)?.label ?? ''}</Copy>
-            {!expired && !failed && !result && <Copy size={10} tint={color.muted}>{`Seat held for ${formatCountdown(remaining ?? 0)}`}</Copy>}
-          </Pile>
-          <Card style={styles.identifiers}>
-            <Identifier label="Payment ID" value={result?.payment_code ?? '—'} />
-            <Identifier label="Booking ID" value={result?.booking_code ?? '—'} />
-          </Card>
-        </>
+            <Copy size={16} weight={800} tint={color.brand}>JD</Copy>
+          </Row>
+          <Copy size={13} tint={color.muted}>
+            {`${ref.campus(data.campus_id)?.code ?? ''} · ${formatDate(data.departure_at)} at ${formatTime(data.departure_at)}`}
+          </Copy>
+          {!expired && !failed && !result && (
+            <Badge tone="brand" icon={LockKeyhole} style={{ marginTop: 8 }}>
+              {`Seat held for ${formatCountdown(remaining ?? 0)}`}
+            </Badge>
+          )}
+        </Card>
       )}
+
       {(expired || !!code) && (
-        <Row gap={9} style={styles.error}>
-          <AlertTriangle size={20} color="#A63737" />
-          <Pile gap={5} style={fill}>
-            <Copy size={10} weight={800} tint="#A63737">{errorCopy(code || 'HOLD_EXPIRED')}</Copy>
-          </Pile>
-        </Row>
-      )}
-      {failed && (
-        <Row gap={9} style={styles.error}>
-          <AlertTriangle size={20} color="#A63737" />
-          <Pile gap={5} style={fill}>
-            <Copy size={10} weight={800} tint="#A63737">Payment wasn’t completed</Copy>
-            <Copy size={8} tint="#A63737" style={{ lineHeight: 12 }}>
-              Your seat was not locked and you were not charged. Payment ID {result?.payment_code}.
+        <Card style={styles.errorCard}>
+          <Row gap={10}>
+            <AlertTriangle size={20} color={color.danger} />
+            <Copy size={13} weight={700} tint={color.danger} style={fill}>
+              {errorCopy(code || 'HOLD_EXPIRED')}
             </Copy>
-          </Pile>
-          <IconButton icon={X} label="Dismiss payment error" size={16} tint="#BD3D3D"
-            style={styles.errorClose} onPress={() => setFailed(false)} />
-        </Row>
+          </Row>
+        </Card>
       )}
-      {failed || expired ? (
-        <Button style={{ marginTop: 24 }} onPress={startAgain}>Start again</Button>
-      ) : (
-        <Pile gap={10} style={styles.simulation}>
-          <Eyebrow>CHOOSE A TEST OUTCOME</Eyebrow>
-          <Button icon={CheckCircle2} disabled={busy || !data} onPress={() => submit('success')}>Simulate payment success</Button>
-          <Button icon={AlertTriangle} tone="secondary" disabled={busy || !data} onPress={() => submit('failed')}>Simulate payment failure</Button>
+
+      {failed && (
+        <Card style={styles.errorCard}>
+          <Row gap={10}>
+            <AlertTriangle size={20} color={color.danger} />
+            <Pile gap={3} style={fill}>
+              <Copy size={14} weight={800} tint={color.danger}>Payment was not completed</Copy>
+              <Copy size={12} tint={color.danger}>
+                {`Your seat hold was released and you were not charged (${result?.payment_code ?? ''}).`}
+              </Copy>
+            </Pile>
+            <IconButton icon={X} label="Dismiss payment error" size={18} tint={color.danger} onPress={() => setFailed(false)} />
+          </Row>
+        </Card>
+      )}
+
+      {!failed && !expired && (
+        <Pile gap={10} style={{ marginTop: 16 }}>
+          <Copy size={14} weight={800} tint={color.navy}>Payment method</Copy>
+          <PayChoice
+            icon={Banknote}
+            title="Cash at Pickup Gate"
+            badge="Active Pilot"
+            detail="Seat locks immediately on your campus account. Pay exact JOD to your assigned captain at boarding."
+            selected
+            onPress={() => {}}
+          />
+          <PayChoice
+            icon={Wallet}
+            title="Jeeny Wallet"
+            badge="Host SDK · Phase 2"
+            detail="Connects to native Jeeny Wallet balance in production host integration."
+            selected={false}
+            muted
+            onPress={() => {}}
+          />
+          <PayChoice
+            icon={CreditCard}
+            title="Card / CliQ"
+            badge="Phase 2"
+            detail="Saved cards and Jordan CliQ instant transfer."
+            selected={false}
+            muted
+            onPress={() => {}}
+          />
         </Pile>
       )}
-      <Copy size={8} tint="#929E9B" style={[center, { marginTop: 8 }]}>This payment screen is for product testing only.</Copy>
     </Page>
   );
 }
 
-function Identifier({ label, value }: { label: string; value: string }) {
-  return <Row style={spread}>
-    <Copy size={9} tint={color.muted}>{label}</Copy><Copy size={10} weight={700} tint={color.navy}>{value}</Copy>
-  </Row>;
-}
-
-function DemoBanner({ icon: Icon, title, detail, subtle = false }: {
-  icon: LucideIcon; title: string; detail: string; subtle?: boolean;
+function PayChoice({ icon: Icon, title, badge, detail, selected, muted = false, onPress }: {
+  icon: typeof Wallet; title: string; badge: string; detail: string; selected: boolean; muted?: boolean; onPress: () => void;
 }) {
-  const tint = subtle ? '#576D68' : '#634EB5';
-  return <Row gap={11} style={[styles.demo, subtle && styles.subtle]}>
-    <Icon size={18} color={tint} />
-    <Pile gap={4} style={fill}>
-      <Copy size={11} weight={800} tint={tint}>{title}</Copy>
-      <Copy size={8} tint={tint} style={{ opacity: 0.8 }}>{detail}</Copy>
-    </Pile>
-  </Row>;
+  return (
+    <ScalePressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected, disabled: muted }}
+      accessibilityLabel={`${title}, ${badge}`}
+      disabled={muted}
+      onPress={onPress}
+      style={[styles.payChoice, selected && styles.payChoiceOn, muted && { opacity: 0.62 }]}
+    >
+      <Tile
+        icon={Icon}
+        size={42}
+        iconSize={20}
+        background={selected ? color.brand : color.soft}
+        tint={selected ? color.white : color.muted}
+      />
+      <Pile gap={3} style={fill}>
+        <Row gap={6} style={{ flexWrap: 'wrap' }}>
+          <Copy size={14} weight={800} tint={color.navy}>{title}</Copy>
+          <Badge tone={selected ? 'brand' : 'slate'}>{badge}</Badge>
+        </Row>
+        <Copy size={12} tint={color.muted} style={{ lineHeight: 18 }}>{detail}</Copy>
+      </Pile>
+      <View style={[styles.radio, selected && styles.radioOn]} />
+    </ScalePressable>
+  );
 }
 
 export function BookingStatus() {
   const router = useRouter();
-  const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
-  const { profile } = useAuth();
+  const { bookingId, bonusPts } = useLocalSearchParams<{ bookingId: string; bonusPts?: string }>();
+  const { refreshLive } = useLiveUpdates();
   const [data, setData] = useState<BookingDetail | null>(null);
   const [code, setCode] = useState('');
+  const [paidWith, setPaidWith] = useState<string | null>(null);
   const status = data?.status;
+  const celebrationScale = useRef(new Animated.Value(0.9)).current;
+
+  useEffect(() => {
+    Animated.spring(celebrationScale, {
+      toValue: 1,
+      damping: 12,
+      stiffness: 180,
+      useNativeDriver: NATIVE_DRIVER,
+    }).start();
+  }, [celebrationScale]);
 
   useEffect(() => {
     let live = true;
     const load = async () => {
       const res = await loadBooking(bookingId);
       if (!live) return;
-      if (res.ok) setData(res.data); else setCode(res.code);
+      if (res.ok) {
+        setData(res.data);
+        const recorded = (res.data as { payment_method?: string }).payment_method;
+        if (recorded === 'cash') setPaidWith('Cash at pickup gate');
+      } else {
+        setCode(res.code);
+      }
     };
     load();
-    // poll every 5 s while the ride is still waiting on a captain
+    readPayMethod(bookingId).then((method) => { if (live && method) setPaidWith(payMethodLabel[method]); });
     const timer = setInterval(() => {
-      if (!status || status === 'seat_booked' || status === 'awaiting_captain') load();
-    }, 5000);
+      load();
+      refreshLive();
+    }, 4000);
     return () => { live = false; clearInterval(timer); };
-  }, [bookingId, status]);
+  }, [bookingId, status, refreshLive]);
 
   if (!data) {
     return (
       <Page>
-        <Header title="Booking status" onBack={() => router.dismissTo('/home')} />
-        <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Loading booking…'}</Copy>
+        <Header title="Booking status" onBack={() => router.dismissTo('/home')} action={<NotificationBell />} />
+        <Card style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
+          <PulseDot tint={color.brand} size={8} />
+          <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Loading live booking status…'}</Copy>
+        </Card>
       </Page>
     );
   }
+
   const confirmed = data.status === 'confirmed' || data.status === 'in_progress' || data.status === 'completed';
   const cancelled = data.status === 'cancelled';
+  const driverChosen = Boolean(data.captain);
   const full = data.seats_taken >= data.capacity;
+  const earnedBonus = Number(bonusPts ?? 0) > 0 || (full && !cancelled);
+
+  const open = Math.max(0, data.capacity - data.seats_taken);
   const steps = [
-    { label: 'Seat booked', done: true },
-    { label: `Group full · ${data.seats_taken}/${data.capacity}`, done: full, note: 'Group complete does not mean trip confirmed' },
-    { label: 'Awaiting captain confirmation', done: full },
+    { label: 'Seat reserved', done: true },
+    { label: 'Car full', done: full },
+    { label: driverChosen && data.captain ? `Captain ${data.captain.name.split(' ')[0]}` : 'Captain assigned', done: driverChosen },
     { label: 'Confirmed', done: confirmed },
   ];
-  const Icon = confirmed ? CheckCircle2 : Clock3;
+
+  const tone = cancelled ? color.danger : confirmed ? color.emerald : color.brand;
+  const statusLabel = cancelled ? 'Cancelled' : confirmed ? 'Confirmed' : driverChosen ? 'Awaiting captain' : full ? 'Car full' : 'Seat reserved';
+  const headline = cancelled
+    ? 'Booking cancelled'
+    : confirmed
+      ? 'You’re all set'
+      : driverChosen
+        ? 'Captain is reviewing'
+        : full
+          ? 'Finding your captain'
+          : `${open} more ${open === 1 ? 'rider' : 'riders'} to go`;
+  const detail = cancelled
+    ? (data.refund && data.refund.amount_fils > 0 ? `Refund ${formatFils(data.refund.amount_fils)}` : 'No refund inside 12h')
+    : confirmed && data.vehicle
+      ? `${data.vehicle.make_model} · ${data.vehicle.plate}`
+      : driverChosen && data.captain
+        ? `${data.captain.name}${data.vehicle ? ` · ${data.vehicle.make_model}` : ''}`
+        : full
+          ? 'Usually takes a minute'
+          : 'Your seat and price are locked';
+
   return (
-    <Page>
-      <Header title="Booking status" onBack={() => router.dismissTo('/home')} />
-      <Pile gap={9} style={[styles.statusHero, confirmed && styles.confirmed]}>
-        <Icon size={31} color={confirmed ? color.brand : color.amber} />
-        <Badge tone={cancelled ? 'slate' : confirmed ? 'green' : 'amber'} style={styles.centered}>
-          {cancelled ? 'CANCELLED' : confirmed ? 'CONFIRMED' : full ? 'AWAITING CAPTAIN' : 'SEAT BOOKED'}
-        </Badge>
-        <Copy accessibilityRole="header" size={20} weight={800} tint={color.navy} style={center}>
-          {cancelled ? 'This booking was cancelled' : confirmed ? 'Your ride is confirmed' : full ? 'Your group is ready' : 'Your seat is booked'}
+    <Page
+      footer={
+        <Button trailingArrow onPress={() => router.push({ pathname: '/trip', params: { bookingId } })}>
+          {confirmed ? 'Open live trip' : 'View trip'}
+        </Button>
+      }
+    >
+      <Header
+        title="Booking"
+        subtitle={`${formatDate(data.pickup_at)} · ${data.code}`}
+        onBack={() => router.dismissTo('/home')}
+        action={<NotificationBell />}
+      />
+
+      {/* Status */}
+      <Animated.View style={{ transform: [{ scale: celebrationScale }] }}>
+        <Row gap={6}>
+          <PulseDot tint={tone} size={7} />
+          <Copy size={13} weight={700} tint={tone}>{statusLabel}</Copy>
+        </Row>
+        <Copy accessibilityRole="header" size={26} weight={800} tint={color.navy} style={{ marginTop: 6, letterSpacing: -0.6 }}>
+          {headline}
         </Copy>
-        <Copy size={10} tint={color.muted} style={[center, { lineHeight: 15 }]}>
-          {cancelled
-            ? (data.refund ? `${data.refund.amount_fils > 0 ? `Full refund issued · ${formatFils(data.refund.amount_fils)}` : 'No refund'}` : '')
-            : confirmed && data.captain
-              ? `Captain ${data.captain.name} · ${data.vehicle?.make_model} · ${data.vehicle?.plate}`
-              : full ? 'We’re assigning a licensed captain to your full group.' : 'We’ll confirm a captain once the group is full.'}
-        </Copy>
-        <Copy size={9} tint={color.muted}>{`${data.code} · ${formatDate(data.pickup_at)} · Pickup ${formatTime(data.pickup_at)} · ${data.pickup_area.name}`}</Copy>
-      </Pile>
-      <View style={styles.steps}>
-        <Row style={spread}><Copy size={13} weight={800}>Group status</Copy><Badge>{full ? 'Complete' : 'Filling'}</Badge></Row>
-        <View>
-          <View style={styles.stepTrack} />
-          {steps.map((step, index) => (
-            <Row key={step.label} gap={11} style={styles.step}>
-              <CheckDot active={step.done} index={index + 1} />
-              <Pile gap={4} style={fill}>
-                <Copy size={10} weight={800} style={{ marginTop: 4 }}>{step.label}</Copy>
-                {index === 1 && full && !confirmed && <Copy size={8} tint="#B07725">{step.note}</Copy>}
-              </Pile>
+        <Copy size={14} tint={color.muted} style={{ marginTop: 2 }}>{detail}</Copy>
+      </Animated.View>
+
+      {earnedBonus && !cancelled && (
+        <Row gap={6} style={styles.bonusStrip}>
+          <Gift size={15} color={color.brand} />
+          <Copy size={13} weight={800} tint={color.brand}>+30 pts added for the last seat</Copy>
+        </Row>
+      )}
+
+      {confirmed && !cancelled && (
+        <View style={{ marginTop: 16 }}>
+          <LivePickupWidget
+            booking={data}
+            appNow={data.app_now}
+            members={data.members}
+            onPress={() => router.push({ pathname: '/trip', params: { bookingId } })}
+          />
+        </View>
+      )}
+
+      {/* Trip */}
+      <View style={[styles.tripCard, { marginTop: 18 }]}>
+        <Row gap={12}>
+          <View style={styles.tripRail}>
+            <View style={styles.tripDotFrom} />
+            <View style={styles.tripLine} />
+            <View style={styles.tripDotTo} />
+          </View>
+          <Pile gap={18} style={fill}>
+            <Row style={spread}>
+              <Copy size={16} weight={800} tint={color.navy} style={fill} numberOfLines={1}>{data.pickup_area.name}</Copy>
+              <Copy size={18} weight={800} tint={color.navy}>{formatTime(data.pickup_at)}</Copy>
+            </Row>
+            <Row style={spread}>
+              <Copy size={16} weight={800} tint={color.navy} style={fill}>{data.campus.code}</Copy>
+              <Copy size={14} weight={700} tint={color.muted}>{formatTime(data.arrival_at)}</Copy>
+            </Row>
+          </Pile>
+        </Row>
+        <View style={styles.tripDivider} />
+        <Row style={spread}>
+          <Row gap={6}>
+            {Array.from({ length: data.capacity }, (_, i) => (
+              <View key={i} style={[styles.seatPip, i < data.seats_taken && styles.seatPipOn]} />
+            ))}
+          </Row>
+          <Copy size={14} weight={800} tint={color.navy}>{formatFils(data.fare_fils)}</Copy>
+        </Row>
+      </View>
+
+      {/* Steps */}
+      {!cancelled && (
+        <View style={{ marginTop: 22 }}>
+          {steps.map((step, i) => (
+            <Row key={step.label} gap={12} style={styles.stepRow}>
+              <View style={[styles.stepDot, step.done && styles.stepDotOn]}>
+                {step.done && <Check size={12} color={color.white} />}
+              </View>
+              <Copy size={15} weight={step.done ? 700 : 500} tint={step.done ? color.navy : color.muted} style={fill}>
+                {step.label}
+              </Copy>
+              {i === 0 && !!paidWith && <Copy size={12} tint={color.muted}>{paidWith}</Copy>}
+              {i === 1 && !full && <Copy size={12} tint={color.muted}>{`${data.seats_taken}/${data.capacity}`}</Copy>}
             </Row>
           ))}
         </View>
-      </View>
-      {profile?.isDemo && !confirmed && !cancelled && (
-        <DemoBanner icon={Info} title="Captain assignment is simulated" detail="Captain confirmation happens in Demo controls" subtle />
       )}
-      {confirmed && <Button style={{ marginTop: 13 }} onPress={() => router.push({ pathname: '/trip', params: { bookingId } })}>View trip details</Button>}
     </Page>
   );
 }
 
 const styles = StyleSheet.create({
-  summaryRoute: { padding: 20, borderRadius: 18, backgroundColor: color.navy },
-  ruleChecks: { marginVertical: 16, gap: 13, borderRadius: 17, padding: 17 },
-  ruleIcon: { width: 17, height: 17, borderRadius: 9, backgroundColor: color.brand, alignItems: 'center', justifyContent: 'center' },
-  price: { gap: 11, borderRadius: 16, padding: 16, borderWidth: 0, backgroundColor: '#F4F7F6' },
-  priceDivider: { height: 1, backgroundColor: '#D9E3DF', marginVertical: 2 },
-  secureNote: { backgroundColor: color.pink, marginTop: 13 },
-  sticky: { marginTop: 24 },
-  demo: { padding: 13, borderRadius: 14, backgroundColor: '#F1EDFF' },
-  subtle: { backgroundColor: '#F1F5F4' },
-  paymentAmount: { alignItems: 'center', paddingTop: 36, paddingBottom: 27 },
-  identifiers: { gap: 24, paddingVertical: 19, paddingHorizontal: 14, borderRadius: 14 },
-  error: { borderRadius: 13, marginTop: 13, backgroundColor: '#FFEFEE', padding: 13, alignItems: 'flex-start' },
-  errorClose: { width: 27, height: 27, borderWidth: 0, backgroundColor: 'transparent' },
-  simulation: { marginTop: 24, padding: 17, backgroundColor: '#F7F9F8', borderRadius: 16 },
-  statusHero: { paddingVertical: 25, paddingHorizontal: 18, alignItems: 'center', borderRadius: 20, backgroundColor: '#FFF7E4' },
-  confirmed: { backgroundColor: color.pink },
-  centered: { alignSelf: 'center' },
-  steps: { paddingVertical: 20, paddingHorizontal: 6, gap: 13 },
-  step: { minHeight: 45, alignItems: 'flex-start' },
-  stepTrack: { position: 'absolute', top: 20, bottom: 42, width: 1, left: 11, backgroundColor: '#DCE4E2' },
+  priceDivider: { height: 1, backgroundColor: color.line, marginVertical: 2 },
+  tripCard: {
+    marginTop: 6, padding: 18, borderRadius: 22, backgroundColor: color.white, borderWidth: 1, borderColor: color.line,
+  },
+  tripRail: { alignItems: 'center', alignSelf: 'stretch', paddingVertical: 5 },
+  tripDotFrom: { width: 12, height: 12, borderRadius: 6, borderWidth: 3, borderColor: color.brand, backgroundColor: color.white },
+  tripLine: { width: 2, flex: 1, backgroundColor: color.line, marginVertical: 4 },
+  tripDotTo: { width: 12, height: 12, borderRadius: 3, backgroundColor: color.navy },
+  priceBlock: { marginTop: 22, gap: 12 },
+  tripDivider: { height: 1, backgroundColor: color.line, marginVertical: 14 },
+  seatPip: { width: 22, height: 8, borderRadius: 4, backgroundColor: color.line },
+  seatPipOn: { backgroundColor: color.brand },
+  bonusStrip: { marginTop: 14, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: color.pink },
+  stepRow: { minHeight: 40 },
+  stepDot: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: color.line,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  stepDotOn: { borderColor: color.brand, backgroundColor: color.brand },
+  amountHero: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    backgroundColor: '#FAF7FC',
+  },
+  errorCard: {
+    marginTop: 12,
+    backgroundColor: color.dangerSoft,
+    borderColor: '#FCA5A5',
+  },
+  payChoice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1.5,
+    borderColor: color.line,
+    borderRadius: 20,
+    padding: 14,
+    minHeight: 72,
+    backgroundColor: color.white,
+  },
+  payChoiceOn: {
+    borderColor: color.brand,
+    backgroundColor: '#FFF7FB',
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#C5BBD4',
+  },
+  radioOn: {
+    borderColor: color.brand,
+    backgroundColor: color.brand,
+  },
 });

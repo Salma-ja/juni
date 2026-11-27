@@ -10,7 +10,7 @@ export function useLoad<T>(load: () => Promise<Res<T>>, deps: unknown[]) {
     let live = true;
     setState((s) => ({ ...s, loading: true }));
     load().then((res) => {
-      if (live) setState(res.ok ? { data: res.data, loading: false } : { code: res.code, loading: false });
+      if (live) setState((s) => (res.ok ? { data: res.data, loading: false } : { data: s.data, code: res.code, loading: false }));
     });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

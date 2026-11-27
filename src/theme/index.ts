@@ -1,17 +1,26 @@
-import type { ViewStyle } from 'react-native';
+import { Platform, type ViewStyle } from 'react-native';
 
 export const color = {
-  brand: '#EC007A',
-  ink: '#122333',
-  navy: '#2B2142',
-  muted: '#756D86',
-  line: '#EBE5F0',
+  brand: '#E90076',
+  brandDark: '#C20062',
+  ink: '#1A1528',
+  navy: '#271C3A',
+  plum: '#34234D',
+  muted: '#665E78',
+  line: '#EAE4F2',
   white: '#FFFFFF',
   pink: '#FFF0F7',
-  soft: '#F7F3F9',
-  sage: '#F3F7F6',
-  danger: '#D94444',
-  amber: '#8F6516',
+  pinkBorder: '#F9C6E0',
+  soft: '#F7F4FA',
+  sage: '#F3F6F8',
+  emerald: '#0D9462',
+  emeraldSoft: '#E8FBF3',
+  danger: '#DC2626',
+  dangerSoft: '#FEF2F2',
+  amber: '#B45309',
+  amberSoft: '#FFFBEB',
+  violet: '#6D28D9',
+  violetSoft: '#F3E8FF',
 } as const;
 
 export const font = {
@@ -26,9 +35,24 @@ export const font = {
 
 export type Weight = keyof typeof font;
 
-export const radius = { field: 14, button: 15, card: 18, sheet: 23, pill: 999 };
-export const spacing = { page: 20, button: 54, tabBar: 79 };
+export const radius = {
+  field: 16,
+  button: 999,
+  card: 22,
+  sheet: 28,
+  pill: 999,
+} as const;
+
+export const spacing = {
+  page: 20,
+  touch: 48,
+  button: 54,
+  tabBar: 72,
+} as const;
 
 export function shadow(y: number, blur: number, tint: string): ViewStyle {
+  if (Platform.OS === 'android') {
+    return { elevation: Math.max(2, Math.round(y / 2)) };
+  }
   return { boxShadow: `0px ${y}px ${blur}px ${tint}` };
 }

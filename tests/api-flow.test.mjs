@@ -30,7 +30,7 @@ after(async () => {
 const post = (path, body = {}, t = token) =>
   fetch(`${base}/api/${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}), ...(process.env.JUNI_REHEARSAL_PIN ? { 'x-rehearsal-key': process.env.JUNI_REHEARSAL_PIN } : {}) },
     body: JSON.stringify(body),
   }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
 

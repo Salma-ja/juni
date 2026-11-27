@@ -1,9 +1,9 @@
 const TZ = 'Asia/Amman';
 
 /** Integer fils -> "1.50 JD" (2 decimals when the third is 0) or "1.375 JD". */
+/** Integer fils as standard 2-decimal JOD. 1350 → "1.35 JD". Never three decimals. */
 export function formatFils(fils: number, unit = true) {
-  const jod = fils / 1000;
-  const text = fils % 10 === 0 ? jod.toFixed(2) : jod.toFixed(3);
+  const text = (Math.round(fils / 10) / 100).toFixed(2);
   return unit ? `${text} JD` : text;
 }
 

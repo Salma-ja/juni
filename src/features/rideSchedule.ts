@@ -1,5 +1,15 @@
 /** Date helpers for the plan screen. Travel times and departures now come from the server (handoff §5.1). */
 
+/** Next Sunday–Thursday, the days groups are actually scheduled. */
+export function nextClassDay() {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  while (date.getDay() === 5 || date.getDay() === 6) date.setDate(date.getDate() + 1);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function tomorrow() {
   const date = new Date();
   date.setDate(date.getDate() + 1);

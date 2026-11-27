@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F4EEFB"/><stop offset="1" stop-color="#FFE6F2"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <!-- route -->
+  <path d="M760 470 C 860 470, 860 300, 960 300 S 1060 140, 1110 140" fill="none" stroke="#E90076" stroke-width="10" stroke-linecap="round" stroke-dasharray="4 22"/>
+  <circle cx="760" cy="470" r="30" fill="#FFFFFF" stroke="#E90076" stroke-width="12"/>
+  <g transform="translate(1110 140)">
+    <circle r="54" fill="#271C3A"/>
+    <path d="M-30 -4 L0 -18 L30 -4 L0 10 Z" fill="#FFFFFF"/><path d="M-16 4 V18 C-6 26 6 26 16 18 V4" fill="#FFFFFF"/>
+  </g>
+  <!-- clock -->
+  <g transform="translate(930 330)">
+    <circle r="96" fill="#FFFFFF" stroke="#271C3A" stroke-width="12"/>
+    <path d="M0 -54 V0 L40 26" fill="none" stroke="#E90076" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle r="10" fill="#271C3A"/>
+  </g>
+  <g fill="#E90076">
+    <path d="M1060 400 l10 26 26 10 -26 10 -10 26 -10 -26 -26 -10 26 -10z"/>
+    <path d="M820 200 l7 18 18 7 -18 7 -7 18 -7 -18 -18 -7 18 -7z"/>
+  </g>
+  <g font-family="Helvetica Neue, Arial">
+    <text x="80" y="150" font-size="28" font-weight="800" fill="#E90076" letter-spacing="3">AI DEPARTURE</text>
+    <text x="80" y="255" font-size="86" font-weight="900" fill="#271C3A" letter-spacing="-3">Never late</text>
+    <text x="80" y="350" font-size="86" font-weight="900" fill="#271C3A" letter-spacing="-3">for class</text>
+    <text x="80" y="440" font-size="34" font-weight="600" fill="#665E78">We read the traffic and pick</text>
+    <text x="80" y="488" font-size="34" font-weight="600" fill="#665E78">the minute you leave.</text>
+  </g>
+</svg>

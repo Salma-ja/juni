@@ -1,166 +1,394 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  ArrowRight, BadgeCheck, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Info, LockKeyhole,
-  MapPin, Navigation, Route, ShieldCheck, Sparkles, Star, TrendingUp, UserPlus, Users, CircleUserRound, X,
+  ArrowRight, BadgeCheck, ChevronLeft, ChevronRight, Flame, Gift, House, Info, LocateFixed, Lock, MapPin,
+  Plus, Route, ShieldCheck, Sparkles, UserPlus,
 } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { RideMap, type MapPoint } from '@/components/RideMap';
 import {
-  Avatar, Badge, BottomSheet, Button, Card, center, Copy, Eyebrow, Field, fill, Header, IconButton,
-  InfoRow, Notice, Page, Pile, RouteCard, Row, SectionHeading, spread, Tile,
+  Avatar, Badge, BottomSheet, Button, Card, center, Copy, fill, Header, IconButton, Notice, Page, Pile,
+  PulseDot, RouteCard, Row, ScalePressable, SectionHeading, spread,
 } from '@/components/ui';
-import { color, shadow } from '@/theme';
-import { parseSchedule, tomorrow } from '@/features/rideSchedule';
 import {
-  createGroup, createRequest, groupDetail, recommendDeparture, searchGroups,
-  type Candidate, type Departure, type GroupDetail as GroupDetailData, type Pref, type SearchResult,
+  createGroup, createRequest, demandStats, fetchIsolatedPools, groupDetail, recommendDeparture,
+  searchGroups, type Candidate, type DemandStat, type Departure, type GroupDetail as GroupDetailData,
+  type IsolatedPoolItem, type Pref, type SearchResult,
 } from '@/data/api';
 import { errorCopy } from '@/data/errors';
+import { roadKm } from '@/data/fareStrip.mjs';
 import { ammanInstant, formatDate, formatFils, formatTime } from '@/data/format';
 import { useRefData } from '@/data/refdata';
 import { useLoad } from '@/data/useLoad';
 import { useAuth } from '@/features/authSession';
+import { AddressPickerSheet, CampusPickerSheet, useLocationPref } from '@/features/locationState';
+import { classTimeChoices, isHotspot } from '@/features/places';
+import { nextClassDay, parseSchedule } from '@/features/rideSchedule';
+import { color, shadow } from '@/theme';
+
+const NATIVE_DRIVER = Platform.OS !== 'web';
 
 type PlanParams = { campusId?: string; pickupAreaId?: string; date?: string; classTime?: string };
+
+function planMapPoints(
+  pickup: { id: string; name: string; lat: number; lng: number; is_custom?: boolean; location_kind?: string } | undefined,
+  campus: { code: string; lat: number; lng: number } | undefined,
+): MapPoint[] {
+  if (!pickup || !campus) return [];
+  const kind: MapPoint['kind'] = pickup.location_kind === 'current_gps'
+    ? 'gps'
+    : pickup.is_custom
+      ? 'home'
+      : isHotspot(pickup.id)
+        ? 'hotspot'
+        : 'you';
+  return [
+    {
+      lat: pickup.lat,
+      lng: pickup.lng,
+      label: pickup.name,
+      kind,
+      caption: pickup.is_custom ? 'Home' : isHotspot(pickup.id) ? 'Hotspot' : 'Pickup',
+    },
+    { lat: campus.lat, lng: campus.lng, label: campus.code, kind: 'campus' },
+  ];
+}
+
+/** Generate upcoming Jordan university teaching days (Sun–Thu). */
+function upcomingTeachingDays(count = 7): { iso: string; dayShort: string; dayNum: string; monthShort: string }[] {
+  const out: { iso: string; dayShort: string; dayNum: string; monthShort: string }[] = [];
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  const pad = (v: number) => String(v).padStart(2, '0');
+  const wdFmt = new Intl.DateTimeFormat('en-US', { weekday: 'short' });
+  const moFmt = new Intl.DateTimeFormat('en-US', { month: 'short' });
+  while (out.length < count) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 5 && d.getDay() !== 6) {
+      out.push({
+        iso: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+        dayShort: wdFmt.format(d),
+        dayNum: String(d.getDate()),
+        monthShort: moFmt.format(d),
+      });
+    }
+  }
+  return out;
+}
 
 export function PlanRide() {
   const router = useRouter();
   const params = useLocalSearchParams<PlanParams>();
   const ref = useRefData();
-  const [campusId, setCampusId] = useState(params.campusId ?? 'just');
-  const [pickupId, setPickupId] = useState<string | null>(params.pickupAreaId ?? null);
-  const [date, setDate] = useState(params.date ?? tomorrow());
-  const [classTime, setClassTime] = useState(params.classTime ?? '08:00');
-  const [editing, setEditing] = useState<'date' | 'classTime' | null>(null);
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState('');
-  const [sheet, setSheet] = useState<'campus' | 'pickup' | null>(null);
-  const [busy, setBusy] = useState(false);
-  const campus = ref.campus(campusId);
-  const pickup = ref.pickup(pickupId);
-  const classDate = parseSchedule(date, '12:00');
+  const { profile } = useAuth();
+  const loc = useLocationPref();
 
-  function edit(field: 'date' | 'classTime') {
-    setDraft(field === 'date' ? date : classTime);
-    setError('');
-    setEditing(field);
+  const [campusId, setCampusId] = useState(params.campusId ?? loc.campusId ?? 'just');
+  const [pickupId, setPickupId] = useState<string>(params.pickupAreaId ?? loc.pickupId ?? 'hawara');
+  const [date, setDate] = useState(params.date ?? nextClassDay());
+  const [classTime, setClassTime] = useState(params.classTime ?? '08:00');
+  const [sheet, setSheet] = useState<'campus' | 'pickupPin' | 'pickupGates' | 'calendar' | 'moreTimes' | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const campus = ref.campus(campusId) ?? loc.campus;
+  const pickup = ref.pickup(pickupId) ?? loc.pickup;
+  const pref: Pref = profile?.gender === 'male' ? 'boys_only' : 'girls_only';
+  const demand = useLoad(() => demandStats(), []);
+  const teachingDays = useMemo(() => upcomingTeachingDays(7), []);
+
+  useEffect(() => {
+    if (params.campusId) setCampusId(params.campusId);
+  }, [params.campusId]);
+
+  useEffect(() => {
+    if (params.pickupAreaId) setPickupId(params.pickupAreaId);
+  }, [params.pickupAreaId]);
+
+  function handleSelectCampus(nextId: string) {
+    setCampusId(nextId);
+    loc.setCampusId(nextId);
+    const nextC = ref.campus(nextId);
+    const curP = ref.pickup(pickupId);
+    if (nextC?.corridor && curP?.corridor && nextC.corridor !== curP.corridor) {
+      const defGate = nextC.corridor === 'amman' ? 'sweileh' : 'hawara';
+      if (ref.pickup(defGate)) {
+        setPickupId(defGate);
+        loc.setPickupId(defGate);
+      }
+    }
+    setSheet(null);
   }
 
-  function save() {
-    if (!editing) return;
-    const next = draft.trim();
-    const candidate = editing === 'date' ? parseSchedule(next, classTime) : parseSchedule(date, next);
-    if (!candidate) {
-      setError(editing === 'date' ? 'Enter a valid date as YYYY-MM-DD.' : 'Enter a valid time as HH:MM (24-hour clock).');
-      return;
-    }
-    if (editing === 'date') setDate(next); else setClassTime(next);
-    setEditing(null);
+  function handleSelectPickup(nextId: string) {
+    setPickupId(nextId);
+    loc.setPickupId(nextId);
+    setError('');
+    setSheet(null);
   }
 
   async function submit() {
     if (busy) return;
     if (!pickup) {
-      setError('Choose your pickup area.');
+      setError('Select your pickup gate.');
       return;
     }
     setBusy(true);
     setError('');
-    const res = await createRequest({ campusId, pickupAreaId: pickup.id, classStartAt: ammanInstant(date, classTime).toISOString() });
+    const res = await createRequest({
+      campusId: campus?.id ?? campusId,
+      pickupAreaId: pickup.id,
+      classStartAt: ammanInstant(date, classTime).toISOString(),
+      pref,
+    });
     setBusy(false);
     if (!res.ok) {
       setError(errorCopy(res.code));
       return;
     }
-    router.push({ pathname: '/suggestion', params: { requestId: res.data.request_id } });
+    // Directly open the unified AI Commute Analysis + Groups screen!
+    router.push({ pathname: '/matching', params: { requestId: res.data.request_id } });
   }
 
+  const classInstant = ammanInstant(date, classTime);
+  const targetArrival = new Date(classInstant.getTime() - 10 * 60000);
+  const estKm = pickup && campus ? roadKm(pickup, campus) : null;
+
   return (
-    <Page>
-      <Header title="Plan a ride" eyebrow="RIDE DETAILS" onBack={() => router.dismissTo('/home')} />
+    <Page
+      footer={
+        <Button icon={Sparkles} disabled={busy || !ref.ready} onPress={submit} trailingArrow>
+          {busy ? 'Analyzing corridor & groups…' : 'Find my group'}
+        </Button>
+      }
+    >
+      <Header
+        title="Plan a ride"
+        subtitle="Schedule your verified campus seat"
+        onBack={() => router.dismissTo('/home')}
+      />
+
+      {/* 1-Tap Home & Current GPS Source Selector */}
+      <Row gap={8} style={{ marginBottom: 10 }}>
+        <ScalePressable
+          accessibilityLabel="Use my current GPS location"
+          disabled={loc.locatingGps}
+          onPress={async () => {
+            const saved = await loc.detectCurrentLocation();
+            if (saved) {
+              setPickupId(saved.id);
+              setError('');
+            }
+          }}
+          style={[styles.sourceChip, pickup?.location_kind === 'current_gps' && styles.sourceChipActive]}
+        >
+          {loc.locatingGps ? <PulseDot tint={color.brand} size={6} /> : <LocateFixed size={15} color={color.brand} />}
+          <Copy size={12} weight={800} tint={color.navy}>
+            {loc.locatingGps ? 'Locating…' : 'Current GPS'}
+          </Copy>
+        </ScalePressable>
+
+        <ScalePressable
+          accessibilityLabel="Pin custom home location on map"
+          onPress={() => setSheet('pickupPin')}
+          style={[styles.sourceChip, pickup?.location_kind === 'custom_home' && styles.sourceChipActive]}
+        >
+          <House size={15} color={color.brand} />
+          <Copy size={12} weight={800} tint={color.navy}>Pin my home</Copy>
+        </ScalePressable>
+
+        <ScalePressable
+          accessibilityLabel="Choose corridor assembly gate"
+          onPress={() => setSheet('pickupGates')}
+          style={[styles.sourceChip, !pickup?.is_custom && styles.sourceChipActive]}
+        >
+          <MapPin size={15} color={color.brand} />
+          <Copy size={12} weight={800} tint={color.navy}>Gates</Copy>
+        </ScalePressable>
+      </Row>
+
+      {/* SINGLE Clean Unified Route Card (No duplicate middle card!) */}
       <RouteCard
-        start={{ label: 'PICKUP', title: pickup?.name ?? 'Choose pickup area', detail: pickup?.detail ?? 'Tap to choose where we pick you up' }}
-        end={{ label: 'DESTINATION', title: campus?.label ?? '…', detail: 'Tap to change university' }}
+        start={{
+          label: pickup?.location_kind === 'current_gps'
+            ? 'CURRENT GPS PICKUP'
+            : pickup?.is_custom
+              ? 'CUSTOM HOME PICKUP'
+              : 'PICKUP LOCATION',
+          title: pickup ? (pickup.name_ar ? `${pickup.name} · ${pickup.name_ar}` : pickup.name) : 'Set home or gate',
+          detail: loc.streetNote || pickup?.gate_landmark_en || pickup?.detail || 'Tap to set your home pickup',
+        }}
+        end={{
+          label: 'DESTINATION UNIVERSITY',
+          title: campus ? `${campus.code} · ${campus.name}` : 'Choose university',
+          detail: campus?.name_ar ? `${campus.name_ar}${estKm ? ` · ${estKm.toFixed(1)} km` : ''}` : 'Tap to switch university',
+        }}
+        onStartPress={() => setSheet('pickupPin')}
         onEndPress={() => setSheet('campus')}
       />
-      <Card style={styles.inputCard}>
-        <InfoRow icon={MapPin} label="Pickup area" value={pickup?.name ?? 'Choose'} style={styles.divider} onPress={() => setSheet('pickup')} />
-        <InfoRow icon={CalendarDays} label="Ride date" value={classDate ? formatDate(classDate) : date} style={styles.divider} onPress={() => edit('date')} />
-        <InfoRow icon={Clock3} label="Class starts" value={formatTime(ammanInstant(date, classTime))} onPress={() => edit('classTime')} />
+
+      {/* Teaching Day Picker Strip (Sun–Thu) */}
+      <SectionHeading
+        title="Teaching day"
+        note="Calendar"
+        onPress={() => setSheet('calendar')}
+      />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayStrip}>
+        {teachingDays.map((d) => {
+          const selected = d.iso === date;
+          return (
+            <ScalePressable
+              key={d.iso}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+              accessibilityLabel={`${d.dayShort} ${d.dayNum} ${d.monthShort}`}
+              onPress={() => { setDate(d.iso); setError(''); }}
+              style={[styles.dayPill, selected && styles.dayPillSelected]}
+            >
+              <Copy size={12} weight={700} tint={selected ? '#FFD1E8' : color.muted}>{d.dayShort}</Copy>
+              <Copy size={18} weight={800} tint={selected ? color.white : color.navy}>{d.dayNum}</Copy>
+              <Copy size={12} weight={600} tint={selected ? '#FFD1E8' : color.muted}>{d.monthShort}</Copy>
+            </ScalePressable>
+          );
+        })}
+      </ScrollView>
+
+      {/* Lecture Bell Picker (Figma 05b · "When does your class start?") */}
+      <SectionHeading
+        title="When does your class start?"
+        note="More times"
+        onPress={() => setSheet('moreTimes')}
+      />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeStrip}>
+        {classTimeChoices.map((choice) => {
+          const selected = classTime === choice.time;
+          const slot = slotStat(demand.data, choice.time);
+          const tag = slot?.is_highlighted
+            ? `Hot · ${slot.rider_count}`
+            : choice.tag;
+          return (
+            <ScalePressable
+              key={choice.time}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+              accessibilityLabel={`Class at ${formatTime(ammanInstant(date, choice.time))}`}
+              onPress={() => { setClassTime(choice.time); setError(''); }}
+              style={[styles.timeChip, selected && styles.timeChipOn]}
+            >
+              <Copy size={14} weight={800} tint={selected ? color.white : color.navy}>
+                {formatTime(ammanInstant(date, choice.time))}
+              </Copy>
+              {!!tag && (
+                <Copy size={12} weight={700} tint={selected ? '#FFE0F0' : color.brand}>{tag}</Copy>
+              )}
+            </ScalePressable>
+          );
+        })}
+      </ScrollView>
+
+      {/* Arrival & Pool Lock Summary Card (Figma 05b big arrival preview) */}
+      <Card style={styles.arrivalPreviewCard}>
+        <Pile gap={2}>
+          <Copy size={12} weight={700} tint={color.muted}>ARRIVE AT GATE</Copy>
+          <Copy size={28} weight={800} tint={color.navy} style={{ letterSpacing: -1 }}>
+            {formatTime(targetArrival)}
+          </Copy>
+          <Copy size={12} tint={color.muted}>
+            {`${formatDate(classInstant)} · 10 min before ${formatTime(classInstant)} lecture`}
+          </Copy>
+        </Pile>
+        <Row gap={6} style={{ flexWrap: 'wrap', marginTop: 10 }}>
+          <Badge tone={pref === 'girls_only' ? 'rose' : 'violet'} icon={Lock}>
+            {pref === 'girls_only' ? 'Girls-only' : 'Boys-only'}
+          </Badge>
+          <Badge tone="brand" icon={Gift}>+30 pts on 4th seat</Badge>
+        </Row>
       </Card>
-      <View style={styles.map}>
-        <Svg viewBox="0 0 350 176" preserveAspectRatio="none" style={StyleSheet.absoluteFill} width="100%" height="100%">
-          <Path d="M-25 18L370 167 M145 185L210 -20" stroke="#FFFFFF90" strokeWidth={12} />
-          <Path d="M20 136L292 9 M115 36L217 220" stroke="#D6E1DA" strokeWidth={13} />
-          <Path d="M20 136L292 9 M115 36L217 220" stroke="#FFFFFF" strokeWidth={11} />
-        </Svg>
-        <View style={styles.pickupPin}><MapPin size={20} color={color.brand} fill={color.brand} /></View>
-        <View style={styles.campusPin}><Copy size={11} tint={color.white} weight={800}>{campus?.code[0] ?? ''}</Copy></View>
-        <Copy size={8} weight={800} style={styles.mapLabel}>{pickup?.name ?? 'Pickup'}</Copy>
-        <Copy size={8} weight={800} style={styles.campusLabel}>{campus?.code ?? ''}</Copy>
-        <Pressable accessibilityRole="button" style={styles.recenter}>
-          <Navigation size={16} color={color.navy} /><Copy size={8} weight={700}>Recenter</Copy>
-        </Pressable>
+
+      {/* Corridor Map Preview */}
+      <View style={{ marginTop: 14 }}>
+        <RideMap
+          height={185}
+          points={planMapPoints(pickup, campus)}
+          polyline={campus?.corridor_polyline}
+        />
       </View>
-      <Notice icon={ShieldCheck} tint="#44665D" style={styles.softNote}>Destinations are limited to verified university campuses.</Notice>
-      {!!error && !editing && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
-      <Button icon={Sparkles} disabled={busy || !ref.ready} onPress={submit} style={styles.action}>{busy ? 'Finding…' : 'Find my group'}</Button>
+
+      {!!error && (
+        <Notice icon={Info} tint={color.danger} style={{ backgroundColor: color.dangerSoft, marginTop: 12 }}>
+          {error}
+        </Notice>
+      )}
+
+      {/* Clean Mobile Pickers */}
       {sheet === 'campus' && (
+        <CampusPickerSheet
+          selectedId={campus?.id ?? campusId}
+          onSelect={handleSelectCampus}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {(sheet === 'pickupPin' || sheet === 'pickupGates') && (
+        <AddressPickerSheet
+          initialMode={sheet === 'pickupPin' ? 'pin' : 'gates'}
+          selectedId={pickup?.id ?? pickupId}
+          currentPickup={pickup}
+          campus={campus}
+          streetNote={loc.streetNote}
+          onChangeStreetNote={loc.setStreetNote}
+          locatingGps={loc.locatingGps}
+          onDetectGps={async (note) => {
+            const saved = await loc.detectCurrentLocation(note);
+            if (saved) {
+              setPickupId(saved.id);
+              setError('');
+              setSheet(null);
+            }
+          }}
+          onSaveCustomPin={async (opts) => {
+            const saved = await loc.saveHomePin(opts);
+            if (saved) {
+              setPickupId(saved.id);
+              setError('');
+              setSheet(null);
+            }
+          }}
+          onSelect={handleSelectPickup}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {sheet === 'calendar' && (
         <BottomSheet onClose={() => setSheet(null)}>
-          <Copy accessibilityRole="header" size={20} weight={800}>Choose a university</Copy>
-          <Card style={styles.inputCard}>
-            {ref.campuses.map((item, index) => {
-              const selected = item.id === campusId;
-              return (
-                <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
-                  onPress={() => { setCampusId(item.id); setSheet(null); }}
-                  style={[styles.campusOption, index < ref.campuses.length - 1 && styles.divider, selected && styles.activeCampus]}>
-                  <Tile icon={MapPin} size={34} iconSize={17} />
-                  <Pile gap={4} style={fill}>
-                    <Copy size={12} weight={800}>{item.name}</Copy>
-                    <Copy size={10} tint={color.muted}>{item.code}</Copy>
-                  </Pile>
-                  {selected && <Check size={18} color={color.brand} />}
-                </Pressable>
-              );
-            })}
-          </Card>
-          <Button tone="secondary" onPress={() => setSheet(null)}>Cancel</Button>
+          <Copy accessibilityRole="header" size={20} weight={800} tint={color.navy}>Choose teaching date</Copy>
+          <Copy size={12} tint={color.muted}>Jordan university week runs Sunday–Thursday (Fri/Sat weekend)</Copy>
+          <MobileCalendarGrid
+            selected={date}
+            onSelect={(val) => {
+              setDate(val);
+              setError('');
+              setSheet(null);
+            }}
+          />
+          <Button tone="secondary" onPress={() => setSheet(null)}>Close</Button>
         </BottomSheet>
       )}
-      {sheet === 'pickup' && (
+
+      {sheet === 'moreTimes' && (
         <BottomSheet onClose={() => setSheet(null)}>
-          <Copy accessibilityRole="header" size={20} weight={800}>Choose your pickup area</Copy>
-          <Card style={styles.inputCard}>
-            {ref.pickupAreas.map((item, index) => {
-              const selected = item.id === pickupId;
-              return (
-                <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
-                  onPress={() => { setPickupId(item.id); setError(''); setSheet(null); }}
-                  style={[styles.campusOption, index < ref.pickupAreas.length - 1 && styles.divider, selected && styles.activeCampus]}>
-                  <Tile icon={MapPin} size={34} iconSize={17} />
-                  <Pile gap={4} style={fill}>
-                    <Copy size={12} weight={800}>{item.name}</Copy>
-                    <Copy size={10} tint={color.muted}>{item.detail}</Copy>
-                  </Pile>
-                  {selected && <Check size={18} color={color.brand} />}
-                </Pressable>
-              );
-            })}
-          </Card>
-          <Button tone="secondary" onPress={() => setSheet(null)}>Cancel</Button>
-        </BottomSheet>
-      )}
-      {editing && (
-        <BottomSheet onClose={() => { setEditing(null); setError(''); }}>
-          <Copy accessibilityRole="header" size={20} weight={800}>{editing === 'date' ? 'Edit ride date' : 'Edit class time'}</Copy>
-          {editing === 'date'
-            ? <DateGrid selected={draft} onSelect={(value) => { setDraft(value); setError(''); }} />
-            : <TimeGrid selected={draft} onSelect={(value) => { setDraft(value); setError(''); }} onSubmit={save} />}
-          {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
-          <Button onPress={save}>Save</Button>
-          <Button tone="secondary" onPress={() => { setEditing(null); setError(''); }}>Cancel</Button>
+          <Copy accessibilityRole="header" size={20} weight={800} tint={color.navy}>Select lecture start time</Copy>
+          <Copy size={12} tint={color.muted}>Your group targets campus gate arrival 10 minutes before class</Copy>
+          <MobileLectureSlots
+            selected={classTime}
+            date={date}
+            onSelect={(val) => {
+              setClassTime(val);
+              setError('');
+              setSheet(null);
+            }}
+          />
+          <Button tone="secondary" onPress={() => setSheet(null)}>Close</Button>
         </BottomSheet>
       )}
     </Page>
@@ -171,7 +399,7 @@ const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const monthLabel = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' });
 const gridDateLabel = new Intl.DateTimeFormat('en-US', { dateStyle: 'full' });
 
-function DateGrid({ selected, onSelect }: { selected: string; onSelect: (value: string) => void }) {
+function MobileCalendarGrid({ selected, onSelect }: { selected: string; onSelect: (value: string) => void }) {
   const [month, setMonth] = useState(() => {
     const date = parseSchedule(selected, '12:00') ?? new Date();
     return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -185,24 +413,52 @@ function DateGrid({ selected, onSelect }: { selected: string; onSelect: (value: 
   const goMonth = (offset: number) => setMonth(new Date(year, monthIndex + offset, 1));
 
   return (
-    <Pile gap={6}>
+    <Pile gap={8}>
       <Row style={spread}>
         <IconButton icon={ChevronLeft} label="Previous month" onPress={() => goMonth(-1)} />
-        <Copy size={15} weight={800}>{monthLabel.format(month)}</Copy>
+        <Copy size={16} weight={800} tint={color.navy}>{monthLabel.format(month)}</Copy>
         <IconButton icon={ChevronRight} label="Next month" onPress={() => goMonth(1)} />
       </Row>
-      <Row gap={2}>
-        {weekdays.map((day) => <Copy key={day} size={10} weight={700} tint={color.muted} style={[fill, center]}>{day}</Copy>)}
+      <Row gap={4}>
+        {weekdays.map((day, idx) => (
+          <Copy key={day} size={12} weight={700} tint={idx >= 5 ? color.brand : color.muted} style={[fill, center]}>
+            {day}
+          </Copy>
+        ))}
       </Row>
       {Array.from({ length: Math.ceil((first + count) / 7) }, (_, week) => (
-        <Row key={week} gap={2}>
+        <Row key={week} gap={4}>
           {weekdays.map((weekday, column) => {
             const day = week * 7 + column - first + 1;
             if (day < 1 || day > count) return <View key={weekday} style={fill} />;
-            const date = new Date(year, monthIndex, day);
+            const cellDate = new Date(year, monthIndex, day);
+            const isWeekend = column === 5 || column === 6;
+            const isPast = cellDate <= today;
+            const disabled = isPast || isWeekend;
             const value = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            return <ScheduleCell key={weekday} label={String(day)} accessibilityLabel={gridDateLabel.format(date)}
-              selected={value === selected} disabled={date < today} onPress={() => onSelect(value)} />;
+            const isSelected = value === selected;
+            return (
+              <ScalePressable
+                key={weekday}
+                accessibilityLabel={gridDateLabel.format(cellDate)}
+                accessibilityState={{ selected: isSelected, disabled }}
+                disabled={disabled}
+                onPress={() => onSelect(value)}
+                style={[
+                  styles.calCell,
+                  isWeekend && styles.calWeekend,
+                  isSelected && styles.calSelected,
+                ]}
+              >
+                <Copy
+                  size={13}
+                  weight={700}
+                  tint={isSelected ? color.white : disabled ? '#B6AFC4' : color.navy}
+                >
+                  {String(day)}
+                </Copy>
+              </ScalePressable>
+            );
           })}
         </Row>
       ))}
@@ -210,134 +466,153 @@ function DateGrid({ selected, onSelect }: { selected: string; onSelect: (value: 
   );
 }
 
-const timeBlocks = [
-  { label: 'Morning', start: 360, end: 720 },
-  { label: 'Afternoon', start: 720, end: 1080 },
-  { label: 'Evening', start: 1080, end: 1440 },
+const ALL_LECTURE_SLOTS = [
+  '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+  '11:00', '11:30', '12:00', '12:30', '13:00', '14:00', '15:00', '16:00',
 ];
 
-function TimeGrid({ selected, onSelect, onSubmit }: {
-  selected: string; onSelect: (value: string) => void; onSubmit: () => void;
+function MobileLectureSlots({ selected, date, onSelect }: {
+  selected: string; date: string; onSelect: (v: string) => void;
 }) {
-  const [initialHour] = selected.split(':').map(Number);
-  const [blockIndex, setBlockIndex] = useState(initialHour >= 18 ? 2 : initialHour >= 12 ? 1 : 0);
-  const block = timeBlocks[blockIndex];
-  const slots = Array.from({ length: (block.end - block.start) / 30 }, (_, index) => {
-    const minutes = block.start + index * 30;
-    const hour = Math.floor(minutes / 60);
-    const minute = String(minutes % 60).padStart(2, '0');
-    return {
-      value: `${String(hour).padStart(2, '0')}:${minute}`,
-      label: `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`,
-    };
-  });
   return (
-    <Pile gap={7}>
-      <Row gap={5}>
-        {timeBlocks.map(({ label }, index) => (
-          <ScheduleCell key={label} label={label} selected={blockIndex === index} onPress={() => setBlockIndex(index)} />
-        ))}
-      </Row>
-      {[0, 4, 8].map((start) => (
-        <Row key={start} gap={5}>
-          {slots.slice(start, start + 4).map(({ value, label }) => (
-            <ScheduleCell key={value} label={label} selected={value === selected} onPress={() => onSelect(value)} />
-          ))}
-        </Row>
-      ))}
-      <Field label="Custom time (HH:MM, 24-hour)" value={selected} onChangeText={onSelect} autoCorrect={false}
-        maxLength={5} returnKeyType="done" onSubmitEditing={onSubmit} />
-    </Pile>
+    <View style={styles.slotGrid}>
+      {ALL_LECTURE_SLOTS.map((slot) => {
+        const active = slot === selected;
+        const instant = ammanInstant(date, slot);
+        const arrive = new Date(instant.getTime() - 10 * 60000);
+        return (
+          <ScalePressable
+            key={slot}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: active }}
+            accessibilityLabel={`Class ${formatTime(instant)}, arrives ${formatTime(arrive)}`}
+            onPress={() => onSelect(slot)}
+            style={[styles.slotCard, active && styles.slotCardActive]}
+          >
+            <Copy size={15} weight={800} tint={active ? color.white : color.navy}>
+              {formatTime(instant)}
+            </Copy>
+            <Copy size={12} tint={active ? '#FFD1E8' : color.muted}>
+              {`Gate ${formatTime(arrive)}`}
+            </Copy>
+          </ScalePressable>
+        );
+      })}
+    </View>
   );
 }
 
-function ScheduleCell({ label, accessibilityLabel, selected, disabled = false, onPress }: {
-  label: string; accessibilityLabel?: string; selected: boolean; disabled?: boolean; onPress: () => void;
-}) {
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ selected, disabled }} disabled={disabled} onPress={onPress}
-      style={[styles.scheduleCell, selected && styles.selectedCell]}>
-      <Copy size={10} weight={700} tint={disabled ? '#AAA5B0' : selected ? color.white : color.navy} style={center}>{label}</Copy>
-    </Pressable>
-  );
-}
-
+/** Legacy /suggestion route seamlessly redirects to the merged AI + Groups screen! */
 export function Suggestion() {
-  const router = useRouter();
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
-  const ref = useRefData();
-  const { data, code, loading } = useLoad<Departure>(() => recommendDeparture(requestId), [requestId]);
-  if (loading || !data) {
-    return (
-      <Page>
-        <Header title="Departure plan" onBack={() => router.dismissTo('/plan')} />
-        <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Working out your departure…'}</Copy>
-        {!!code && <Button tone="secondary" onPress={() => router.dismissTo('/plan')}>Choose another time</Button>}
-      </Page>
-    );
-  }
-  const fallback = data.travel_source === 'fallback';
-  const departure = formatTime(data.departure_at);
-  const campus = ref.campus(data.campus_id);
-  return (
-    <Page>
-      <Header title="Departure plan" onBack={() => router.dismissTo('/plan')} />
-      <Pile gap={9} style={styles.aiHero}>
-        <Tile icon={Sparkles} size={65} iconSize={30} tint="#7157D2" background="#E9E2FF" style={styles.aiOrb} />
-        <Badge tone={fallback ? 'amber' : 'violet'} style={styles.centered}>{fallback ? 'ESTIMATE' : 'RECOMMENDED'}</Badge>
-        <Copy accessibilityRole="header" size={28} weight={800} style={[center, { letterSpacing: -1.12, marginTop: 8 }]}>
-          Leave at <Copy size={28} weight={800} tint="#6B50C7">{departure}</Copy>
-        </Copy>
-        <Copy tint={color.muted}>{`${formatDate(data.class_start_at)} · For your ${formatTime(data.class_start_at)} class at ${campus?.code ?? ''}`}</Copy>
-      </Pile>
-      <Card style={styles.timing}>
-        <Timing time={departure} label="DEPART" /><View style={styles.timingLine} />
-        <Timing time={`${data.route_minutes} min`} label="EST. TRAVEL" /><View style={styles.timingLine} />
-        <Timing time={formatTime(data.arrival_at)} label="ARRIVE" />
-      </Card>
-      <Pile gap={7} style={styles.facts}>
-        <Fact icon={Clock3} text={`Arrives ${data.minutes_before_class} min before class`} />
-        {!fallback && data.peak_factor > 1 && <Fact icon={TrendingUp} text="Includes peak-hour traffic factor" />}
-        {data.alternative && <Fact icon={Route} text={`Another group leaves at ${formatTime(data.alternative.departure_at)}`} />}
-      </Pile>
-      {fallback && <Notice icon={Info} tint="#735C23">Estimate. Live travel data unavailable.</Notice>}
-      <Pile gap={9} style={styles.action}>
-        <Button onPress={() => router.push({ pathname: '/matching', params: { requestId } })}>{`Accept ${departure} & search`}</Button>
-        <Button tone="secondary" onPress={() => router.dismissTo('/plan')}>Choose another time</Button>
-      </Pile>
-    </Page>
-  );
+  return <Redirect href={{ pathname: '/matching', params: { requestId } }} />;
 }
 
-function Fact({ icon: Icon, text }: { icon: typeof Route; text: string }) {
-  return <Row gap={8}><Icon size={16} color={color.muted} /><Copy size={11} tint={color.muted} style={fill}>{text}</Copy></Row>;
-}
-
-function Timing({ time, label }: { time: string; label: string }) {
-  return <Pile gap={4} style={{ alignItems: 'center' }}>
-    <Copy size={14} weight={800}>{time}</Copy><Eyebrow tint={color.muted} size={7}>{label}</Eyebrow>
-  </Pile>;
-}
-
-const filterOptions: { label: string; pref: Pref }[] = [
-  { label: 'Girls-only', pref: 'girls_only' },
-  { label: 'Boys-only', pref: 'boys_only' },
-  { label: 'Any', pref: 'any' },
-];
 const prefBadge: Record<Pref, { label: string; tone: 'rose' | 'slate' | 'violet' }> = {
   girls_only: { label: 'Girls-only', tone: 'rose' },
   boys_only: { label: 'Boys-only', tone: 'violet' },
-  any: { label: 'Any', tone: 'slate' },
+  any: { label: 'Mixed', tone: 'slate' },
 };
 
+function AnimatedAiCommuteHeader({ dep }: { dep: Departure | undefined }) {
+  const reveal = useRef(new Animated.Value(0)).current;
+  const bar = useRef(new Animated.Value(0)).current;
+  const glow = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!dep) return;
+    reveal.setValue(0);
+    bar.setValue(0);
+    Animated.sequence([
+      Animated.timing(reveal, { toValue: 1, duration: 380, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(bar, { toValue: 1, duration: 750, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+    ]).start();
+  }, [dep?.request_id, reveal, bar]);
+
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(glow, { toValue: 1, duration: 1300, useNativeDriver: NATIVE_DRIVER }),
+      Animated.timing(glow, { toValue: 0, duration: 1300, useNativeDriver: NATIVE_DRIVER }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [glow]);
+
+  const label = (
+    <Row gap={6}>
+      <Animated.View style={{ opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }}>
+        <Sparkles size={14} color="#FF8AC4" />
+      </Animated.View>
+      <Copy size={12} weight={700} tint="#BFB2D6">AI departure</Copy>
+    </Row>
+  );
+
+  if (!dep) {
+    return (
+      <View style={styles.aiCard}>
+        {label}
+        <Copy size={14} weight={600} tint="#E9E0F7" style={{ marginTop: 18 }}>Reading traffic on your route…</Copy>
+        <View style={[styles.aiTrack, { marginTop: 14 }]}><View style={[styles.aiTrackFill, { width: '35%' }]} /></View>
+      </View>
+    );
+  }
+
+  const fallback = dep.travel_source === 'fallback';
+  const confidence = fallback ? 84 : dep.peak_factor > 1 ? 92 : 95;
+  const [clock, meridiem] = formatTime(dep.departure_at).split(' ');
+
+  return (
+    <View style={styles.aiCard}>
+      <Row style={spread}>
+        {label}
+        <Row gap={6}>
+          <PulseDot tint={fallback ? '#FBBF24' : '#34D399'} size={6} />
+          <Copy size={12} weight={700} tint="#BFB2D6">{fallback ? 'Estimate' : `${confidence}% on time`}</Copy>
+        </Row>
+      </Row>
+      <Animated.View style={{
+        opacity: reveal,
+        transform: [{ translateY: reveal.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+      }}>
+        <Copy size={12} weight={700} tint="#BFB2D6" style={{ marginTop: 16 }}>LEAVE AT</Copy>
+        <Row gap={6} style={{ alignItems: 'baseline' }}>
+          <Copy size={56} weight={800} tint={color.white} style={styles.aiLeaveTime}>{clock}</Copy>
+          <Copy size={20} weight={800} tint="#FF8AC4">{meridiem ?? ''}</Copy>
+        </Row>
+        <View style={[styles.aiTrack, { marginTop: 14 }]}>
+          <Animated.View style={[styles.aiTrackFill, {
+            width: bar.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+          }]} />
+        </View>
+        <Row style={[spread, { marginTop: 10 }]}>
+          <Copy size={12} tint="#BFB2D6">{`${dep.route_minutes} min ride`}</Copy>
+          <Pile gap={0} style={{ alignItems: 'center' }}>
+            <Copy size={14} weight={800} tint={color.white}>{formatTime(dep.arrival_at)}</Copy>
+            <Copy size={12} tint="#BFB2D6">Gate</Copy>
+          </Pile>
+          <Pile gap={0} style={{ alignItems: 'flex-end' }}>
+            <Copy size={14} weight={800} tint={color.white}>{formatTime(dep.class_start_at)}</Copy>
+            <Copy size={12} tint="#BFB2D6">Lecture</Copy>
+          </Pile>
+        </Row>
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * Unified AI Expected Time + Gender-Isolated Groups Screen!
+ * Shows multiple groups, clear Girls-only / Boys-only isolation tabs, and +30 pts Last-Seat Offer.
+ */
 export function Matching() {
   const router = useRouter();
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
   const { profile } = useAuth();
   const ref = useRefData();
-  const [pref, setPref] = useState<Pref>(profile?.gender === 'male' ? 'boys_only' : 'girls_only');
+  const ownPref: Pref = profile?.gender === 'male' ? 'boys_only' : 'girls_only';
+
   const [result, setResult] = useState<SearchResult | null>(null);
+  const [pools, setPools] = useState<IsolatedPoolItem[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const dep = useLoad<Departure>(() => recommendDeparture(requestId), [requestId]);
@@ -345,18 +620,24 @@ export function Matching() {
   useEffect(() => {
     let live = true;
     setError('');
-    searchGroups(requestId, pref).then((res) => {
+    Promise.all([searchGroups(requestId, ownPref), fetchIsolatedPools(requestId)]).then(([sRes, pRes]) => {
       if (!live) return;
-      if (res.ok) setResult(res.data); else setError(errorCopy(res.code));
+      if (sRes.ok) setResult(sRes.data);
+      else setError(errorCopy(sRes.code));
+      if (pRes.ok) setPools(pRes.data.pools);
     });
     return () => { live = false; };
-  }, [requestId, pref]);
+  }, [requestId, ownPref]);
 
   const request = dep.data;
+  const campus = ref.campus(request?.campus_id);
+  const pickup = ref.pickup(request?.pickup_area_id);
+
   const planParams = request ? {
-    campusId: request.campus_id, pickupAreaId: request.pickup_area_id,
+    campusId: request.campus_id,
+    pickupAreaId: request.pickup_area_id,
     date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Amman' }).format(new Date(request.class_start_at)),
-    classTime: new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Amman', hour: '2-digit', minute: '2-digit' }).format(new Date(request.class_start_at)),
+    classTime: new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Amman', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(request.class_start_at)),
   } : {};
 
   async function startNewGroup() {
@@ -367,104 +648,198 @@ export function Matching() {
     if (!res.ok) { setError(errorCopy(res.code)); return; }
     router.push({ pathname: '/group', params: { groupId: res.data.group_id, requestId } });
   }
-  const open = (c: Candidate) => router.push({ pathname: '/group', params: { groupId: c.group_id, requestId } });
-  const candidates = result?.candidates ?? [];
+
+  const openCandidate = useCallback((c: Candidate) => {
+    router.push({ pathname: '/group', params: { groupId: c.group_id, requestId } });
+  }, [requestId, router]);
+
+  const candidates = useMemo(
+    () => (result?.candidates ?? []).filter((c) => c.pref === ownPref),
+    [result?.candidates, ownPref],
+  );
+
+  const candidateIds = useMemo(() => new Set(candidates.map((c) => c.group_id)), [candidates]);
+
+  const otherSameGenderSlots = useMemo(
+    () => pools.filter((p) => p.pref === ownPref && !candidateIds.has(p.group_id)),
+    [pools, ownPref, candidateIds],
+  );
+
+  const prefLabel = ownPref === 'girls_only' ? 'Girls-only' : 'Boys-only';
+
+  const switchToTime = (arrivalAt: string) => {
+    const classDate = new Date(new Date(arrivalAt).getTime() + 10 * 60000);
+    const hhmm = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Amman', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(classDate);
+    router.dismissTo({ pathname: '/plan', params: { ...planParams, classTime: hhmm } });
+  };
+  const [best, ...more] = candidates;
 
   return (
     <Page>
-      <Header title="Suggested groups" onBack={() => router.dismissTo({ pathname: '/suggestion', params: { requestId } })} />
-      <Row style={[spread, styles.routeSummary]}>
-        <Row gap={8}><MapPin size={18} color={color.brand} /><TimingStop title={ref.pickup(request?.pickup_area_id)?.name ?? '…'} detail="Pickup" /></Row>
-        <ArrowRight size={18} color={color.muted} />
-        <Row gap={8}><View style={styles.campusDot}><Copy size={11} weight={800} tint={color.white}>{ref.campus(request?.campus_id)?.code[0] ?? ''}</Copy></View>
-          <TimingStop title={ref.campus(request?.campus_id)?.code ?? '…'}
-            detail={request ? `${formatDate(request.arrival_at)} · arrive ${formatTime(request.arrival_at)}` : ''} /></Row>
-      </Row>
-      <Row gap={7} style={styles.filters}>
-        {filterOptions.map((item) => (
-          <Pressable key={item.pref} accessibilityRole="button" accessibilityState={{ selected: pref === item.pref }}
-            onPress={() => { setResult(null); setPref(item.pref); }} style={[styles.filter, pref === item.pref && styles.filterSelected]}>
-            <Copy size={9} weight={700} tint={pref === item.pref ? color.brand : color.muted}>{item.label}</Copy>
-          </Pressable>
-        ))}
-      </Row>
-      {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
-      {!result && !error && <Copy tint={color.muted}>Searching groups…</Copy>}
-      {result && candidates.length === 0 && (
-        <Pile gap={9} style={styles.empty}>
-          <View style={styles.emptyIcon}>
-            <Users size={35} color="#92A19D" />
-            <Copy weight={800} tint="#92A19D" style={styles.questionMark}>?</Copy>
-          </View>
-          <Copy accessibilityRole="header" size={21} weight={800} style={center}>No match found yet</Copy>
-          <Copy size={11} tint={color.muted} style={[center, { lineHeight: 18, marginBottom: 13 }]}>
-            {errorCopy(result.reason ?? 'NO_GROUPS_AT_TIME')}
-          </Copy>
-          <Button disabled={busy} onPress={startNewGroup}>Start a new group</Button>
-          <Button tone="secondary" onPress={() => router.dismissTo({ pathname: '/plan', params: planParams })}>Change class time</Button>
-          <Button tone="secondary" onPress={() => router.dismissTo({ pathname: '/plan', params: planParams })}>Change pickup</Button>
-        </Pile>
+      <Header
+        title="Groups"
+        subtitle={pickup && campus ? `${pickup.name} → ${campus.code} · ${prefLabel}` : prefLabel}
+        onBack={() => router.dismissTo({ pathname: '/plan', params: planParams })}
+      />
+
+      <AnimatedAiCommuteHeader dep={request} />
+
+      {!!error && (
+        <Notice icon={Info} tint={color.danger} style={{ backgroundColor: color.dangerSoft, marginTop: 14 }}>
+          {error}
+        </Notice>
       )}
-      {candidates.length > 0 && (
-        <Pile gap={11}>
-          <Copy size={10} weight={700}>{`${candidates.length} ${candidates.length === 1 ? 'group' : 'groups'} for your time`}</Copy>
-          {candidates.map((c, index) => <GroupCard key={c.group_id} c={c} best={index === 0} onPress={() => open(c)} />)}
-          <Row gap={6} style={{ padding: 4 }}><Info size={15} color={color.muted} />
-            <Copy size={9} tint={color.muted} style={fill}>JUNI suggests groups. You always choose before booking.</Copy>
-          </Row>
-        </Pile>
+
+      {!result && !error && (
+        <Row gap={8} style={{ marginTop: 28 }}>
+          <PulseDot tint={color.brand} size={8} />
+          <Copy size={14} weight={600} tint={color.muted}>Finding groups…</Copy>
+        </Row>
+      )}
+
+      {best && (
+        <>
+          <SectionLabel>Best match</SectionLabel>
+          <FadeIn index={0}>
+            <GroupTile
+              time={formatTime(best.pickup_at)}
+              caption={`Gate ${formatTime(best.arrival_at)}`}
+              price={formatFils(best.fare_fils)}
+              taken={best.seats_taken}
+              capacity={best.capacity}
+              highlight
+              onPress={() => openCandidate(best)}
+            />
+          </FadeIn>
+        </>
+      )}
+
+      {more.length > 0 && (
+        <>
+          <SectionLabel>More groups</SectionLabel>
+          <Pile gap={10}>
+            {more.map((c, i) => (
+              <FadeIn key={c.group_id} index={i + 1}>
+                <GroupTile
+                  time={formatTime(c.pickup_at)}
+                  caption={`Gate ${formatTime(c.arrival_at)}`}
+                  price={formatFils(c.fare_fils)}
+                  taken={c.seats_taken}
+                  capacity={c.capacity}
+                  onPress={() => openCandidate(c)}
+                />
+              </FadeIn>
+            ))}
+          </Pile>
+        </>
+      )}
+
+      {result && (
+        <ScalePressable
+          accessibilityLabel="Start a new group"
+          onPress={startNewGroup}
+          disabled={busy}
+          style={styles.newGroupTile}
+        >
+          <Plus size={18} color={color.brand} />
+          <Copy size={15} weight={800} tint={color.brand}>{busy ? 'Starting…' : 'Start a new group'}</Copy>
+        </ScalePressable>
+      )}
+
+      {otherSameGenderSlots.length > 0 && (
+        <>
+          <SectionLabel>Other times</SectionLabel>
+          <Pile gap={10}>
+            {otherSameGenderSlots.slice(0, 4).map((item) => (
+              <GroupTile
+                key={item.group_id}
+                time={`Gate ${formatTime(item.arrival_at)}`}
+                caption={`Leaves ${formatTime(item.departure_at)}`}
+                taken={item.seats_taken}
+                capacity={item.capacity}
+                onPress={() => switchToTime(item.arrival_at)}
+              />
+            ))}
+          </Pile>
+        </>
       )}
     </Page>
   );
 }
 
-function GroupCard({ c, best, onPress }: { c: Candidate; best: boolean; onPress: () => void }) {
-  const badge = prefBadge[c.pref];
-  const left = c.capacity - c.seats_taken;
+function SectionLabel({ children }: { children: string }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${best ? 'Best match, ' : 'Group, '}${formatTime(c.departure_at)}`}
-      onPress={onPress} style={[styles.groupCard, best && styles.featured]}>
-      {best && (
-        <Row gap={4} style={styles.bestMatch}>
-          <Star size={14} color={color.brand} fill={color.brand} />
-          <Copy size={8} weight={800} tint={color.brand}>BEST MATCH</Copy>
-        </Row>
-      )}
-      <Row style={[spread, { alignItems: 'flex-start' }]}>
-        <Pile gap={7}><GroupTime time={formatTime(c.departure_at)} /><Badge tone={badge.tone}>{badge.label}</Badge></Pile>
-        <Copy size={17} weight={800}>{formatFils(c.fare_fils, false)} <Copy size={8} tint={color.muted}>JD / seat</Copy></Copy>
-      </Row>
-      <Row gap={4} style={styles.seats}>
-        {Array.from({ length: c.capacity }, (_, i) => i + 1).map((number) => (
-          <View key={number} style={[styles.seat, number <= c.seats_taken && { backgroundColor: color.pink, borderWidth: 0 }]}>
-            <CircleUserRound size={19} color={number <= c.seats_taken ? color.brand : '#9BA8A5'} />
-          </View>
-        ))}
-        <Pile gap={3} style={{ marginLeft: 7 }}>
-          <Copy size={10} weight={800}>{`${c.seats_taken}/${c.capacity} seats filled`}</Copy>
-          <Copy size={8} tint={left === 1 ? '#B64F44' : color.muted}>{`${left} ${left === 1 ? 'seat' : 'seats'} left`}</Copy>
-        </Pile>
-      </Row>
-      <Row gap={14} style={styles.matchFacts}>
-        <MatchFact icon={Clock3} title={`Your pickup ${formatTime(c.pickup_at)}`} />
-        {c.added_minutes > 0 && <MatchFact icon={Route} title={`+${c.added_minutes} min`} />}
-        {c.travel_source === 'fallback' && <MatchFact icon={Info} title="Estimate" />}
-      </Row>
-    </Pressable>
+    <Copy accessibilityRole="header" size={12} weight={800} tint={color.muted} style={styles.sectionLabel}>
+      {children.toUpperCase()}
+    </Copy>
   );
 }
 
-function TimingStop({ title, detail }: { title: string; detail: string }) {
-  return <Pile gap={4}><Copy size={11} weight={800}>{title}</Copy><Copy size={8} tint={color.muted}>{detail}</Copy></Pile>;
+/** One group, same layout everywhere: time + price on top, seats underneath, last-seat strip if it applies. */
+function GroupTile({ time, caption, price, taken, capacity, highlight = false, onPress }: {
+  time: string; caption: string; price?: string; taken: number; capacity: number;
+  highlight?: boolean; onPress: () => void;
+}) {
+  const open = capacity - taken;
+  const lastSeat = open === 1;
+  return (
+    <ScalePressable
+      accessibilityLabel={`${time}, ${caption}, ${taken} of ${capacity} seats${price ? `, ${price}` : ''}${lastSeat ? ', last seat, plus 30 points' : ''}`}
+      onPress={onPress}
+      scaleTo={0.98}
+      style={[styles.groupTile, highlight && styles.groupTileOn]}
+    >
+      <View style={styles.groupTileBody}>
+        <Row style={spread}>
+          <Pile gap={1}>
+            <Copy size={22} weight={800} tint={color.navy} style={{ letterSpacing: -0.6 }}>{time}</Copy>
+            <Copy size={13} tint={color.muted}>{caption}</Copy>
+          </Pile>
+          {price ? (
+            <Copy size={20} weight={800} tint={highlight ? color.brand : color.navy}>{price}</Copy>
+          ) : (
+            <ChevronRight size={20} color={color.muted} />
+          )}
+        </Row>
+        <Row style={[spread, { marginTop: 14 }]}>
+          <Row gap={6}>
+            {Array.from({ length: capacity }, (_, i) => (
+              <View key={i} style={[styles.seatPip, i < taken && styles.seatPipOn]} />
+            ))}
+          </Row>
+          <Copy size={13} weight={700} tint={color.muted}>
+            {open === capacity ? 'Empty' : `${taken}/${capacity} seats`}
+          </Copy>
+        </Row>
+      </View>
+      {lastSeat && (
+        <Row gap={6} style={styles.groupTileStrip}>
+          <Flame size={14} color={color.brand} />
+          <Copy size={13} weight={800} tint={color.brand}>Last seat · +30 pts</Copy>
+        </Row>
+      )}
+    </ScalePressable>
+  );
 }
 
-function GroupTime({ time }: { time: string }) {
-  const [clock, period] = time.split(/\s+/);
-  return <Copy size={23} weight={800} tint={color.navy} style={{ letterSpacing: -0.92 }}>{clock}<Copy size={10} weight={700}>{` ${period}`}</Copy></Copy>;
-}
-
-function MatchFact({ icon: Icon, title }: { icon: typeof Route; title: string }) {
-  return <Row gap={5}><Icon size={16} color={color.muted} /><Copy size={9} tint={color.muted}>{title}</Copy></Row>;
+/** Staggered fade-and-rise for list rows. */
+function FadeIn({ index, children }: { index: number; children: ReactNode }) {
+  const enter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(enter, {
+      toValue: 1, duration: 300, delay: 120 + index * 70, easing: Easing.out(Easing.cubic), useNativeDriver: NATIVE_DRIVER,
+    }).start();
+  }, [enter, index]);
+  return (
+    <Animated.View style={{
+      opacity: enter,
+      transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+    }}>
+      {children}
+    </Animated.View>
+  );
 }
 
 export function GroupDetails() {
@@ -473,137 +848,390 @@ export function GroupDetails() {
   const ref = useRefData();
   const { data, code, loading } = useLoad<GroupDetailData>(() => groupDetail(groupId, requestId), [groupId, requestId]);
   const back = () => router.dismissTo({ pathname: '/matching', params: { requestId } });
+
   if (loading || !data) {
     return (
       <Page>
-        <Header title="Group details" onBack={back} />
-        <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Loading group…'}</Copy>
+        <Header title="Your group" onBack={back} />
+        <Card style={{ alignItems: 'center', paddingVertical: 28, gap: 10 }}>
+          <PulseDot tint={color.brand} size={8} />
+          <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Loading group & fare breakdown…'}</Copy>
+        </Card>
       </Page>
     );
   }
+
+  if (data.pref === 'any') {
+    return (
+      <Page>
+        <Header title="Your group" onBack={back} />
+        <Notice icon={Info} tint={color.danger} style={{ backgroundColor: color.dangerSoft }}>
+          Mixed groups are disabled. Only gender-isolated cars are offered.
+        </Notice>
+        <Button tone="secondary" onPress={back}>Back to groups</Button>
+      </Page>
+    );
+  }
+
   const badge = prefBadge[data.pref];
   const pickupName = ref.pickup(data.pickup_area_id)?.name ?? 'Pickup';
   const left = data.capacity - data.seats_taken;
+  const isLastSeat = left === 1;
+  const campus = ref.campus(data.campus_id);
+
+  const mapPoints: MapPoint[] = [];
+  for (const stop of data.stops) {
+    const area = ref.pickupAreas.find((item) => item.name === stop);
+    if (!area) continue;
+    mapPoints.push({
+      lat: area.lat,
+      lng: area.lng,
+      label: area.name,
+      kind: isHotspot(area.id) ? 'hotspot' : 'stop',
+    });
+  }
+  if (campus) mapPoints.push({ lat: campus.lat, lng: campus.lng, label: campus.code, kind: 'campus' });
+
+  const locked = data.locked_seats ?? [];
+  const lockedSum = locked.reduce((sum, seat) => sum + Number(seat.fare_fils), 0);
+  const youFare = Number(data.fare_fils);
+  const openRemainder = data.group_fare_fils - lockedSum - youFare;
+  const youKm = data.your_gate ? Number(data.your_gate.km) : null;
+  const cutoff = new Date(new Date(data.pickup_at).getTime() - 12 * 60 * 60 * 1000);
+  const freeCancel = cutoff.getTime() > Date.now();
+  const confidence = data.travel_source === 'fallback' ? 84 : 92;
+
   return (
-    <Page>
-      <Header title="Group details" onBack={back} />
-      <View style={{ padding: 18, borderRadius: 18, backgroundColor: color.navy }}>
-        <Row gap={5}><Badge tone={badge.tone}>{badge.label}</Badge>{data.travel_source === 'fallback' && <Badge tone="amber">Estimate</Badge>}</Row>
-        <RouteTitle light marginTop={18} pickup={pickupName} destination={ref.campus(data.campus_id)?.code ?? ''} />
-        <Copy size={10} tint="#CFC5DA">{`${formatDate(data.departure_at)} · Departs ${formatTime(data.departure_at)} · Your pickup ${formatTime(data.pickup_at)}`}</Copy>
-        <Copy size={10} tint="#CFC5DA">{`Stops: ${data.stops.join(' → ')}`}</Copy>
+    <Page
+      footer={
+        <Row gap={14}>
+          <Pile gap={0}>
+            <Copy size={22} weight={800} tint={color.navy}>{formatFils(data.fare_fils)}</Copy>
+            <Copy size={12} tint={isLastSeat ? color.brand : color.muted} weight={isLastSeat ? 700 : 400}>
+              {isLastSeat ? '+30 pts' : 'your seat'}
+            </Copy>
+          </Pile>
+          <Button
+            onPress={() => router.push({
+              pathname: '/summary',
+              params: {
+                groupId: data.group_id,
+                requestId,
+                routeVersion: String(data.route_version),
+                pickupAreaId: data.pickup_area_id,
+              },
+            })}
+            disabled={data.full || data.over_cap}
+            trailingArrow
+            style={fill}
+          >
+            {isLastSeat ? 'Take the last seat' : 'Book seat'}
+          </Button>
+        </Row>
+      }
+    >
+      <Header
+        title="Your group"
+        subtitle={`${formatDate(data.departure_at)} · ${badge.label}`}
+        onBack={back}
+      />
+
+      {/* Trip: pickup → campus gate */}
+      <View style={styles.tripCard}>
+        <Row style={spread}>
+          <Copy size={12} weight={700} tint={color.muted}>{`${data.route_minutes ?? ''}${data.route_minutes ? ' min ride' : 'Trip'}`}</Copy>
+          <Row gap={6}>
+            <PulseDot tint={color.emerald} size={6} />
+            <Copy size={12} weight={700} tint={color.navy}>{`${confidence}% on time`}</Copy>
+          </Row>
+        </Row>
+        <Row gap={12} style={{ marginTop: 14 }}>
+          <View style={styles.tripRail}>
+            <View style={styles.tripDotFrom} />
+            <View style={styles.tripLine} />
+            <View style={styles.tripDotTo} />
+          </View>
+          <Pile gap={18} style={fill}>
+            <Row style={spread}>
+              <Pile gap={0} style={fill}>
+                <Copy size={16} weight={800} tint={color.navy} numberOfLines={1}>{pickupName}</Copy>
+                <Copy size={12} tint={color.muted}>Pickup</Copy>
+              </Pile>
+              <Copy size={20} weight={800} tint={color.navy}>{formatTime(data.pickup_at)}</Copy>
+            </Row>
+            <Row style={spread}>
+              <Pile gap={0} style={fill}>
+                <Copy size={16} weight={800} tint={color.navy} numberOfLines={1}>{campus?.code ?? 'Campus'}</Copy>
+                <Copy size={12} tint={color.muted}>Gate</Copy>
+              </Pile>
+              <Copy size={20} weight={800} tint={color.muted}>{formatTime(data.arrival_at)}</Copy>
+            </Row>
+          </Pile>
+        </Row>
       </View>
-      <Row gap={5} style={styles.seatSummary}>
-        <SeatStat number={String(data.seats_taken)} label="reserved" /><View style={styles.seatDivider} />
-        <SeatStat number={String(left)} label={left === 1 ? 'seat left' : 'seats left'} /><View style={styles.seatDivider} />
-        <SeatStat number={String(data.capacity)} label="max seats" />
+
+      {/* Seats */}
+      <Row style={[spread, { marginTop: 22 }]}>
+        <Copy accessibilityRole="header" size={16} weight={800} tint={color.navy}>Riders</Copy>
+        <Copy size={13} weight={700} tint={color.muted}>{`${data.seats_taken}/${data.capacity}`}</Copy>
       </Row>
-      <SectionHeading title="Your ride group" note="Verified only" />
-      <View style={styles.memberList}>
-        {data.members.map((member, index) => (
-          <Row key={`${member.first_name}-${index}`} style={styles.member}>
-            <Avatar name={member.first_name[0]} index={index} size={34} />
-            <Copy size={11} weight={800} style={fill}>{member.first_name}</Copy>
-            {member.verified && <Badge icon={BadgeCheck}>Verified</Badge>}
+      <Row style={styles.seatRow}>
+        {Array.from({ length: data.capacity }, (_, i) => {
+          const member = data.members[i];
+          const isYou = !member && i === data.members.length && left > 0;
+          return (
+            <Pile key={i} gap={6} style={styles.seat}>
+              {member ? (
+                <View>
+                  <Avatar name={member.first_name[0]} index={i} size={48} />
+                  {member.verified && (
+                    <View style={styles.seatCheck}><BadgeCheck size={14} color={color.emerald} /></View>
+                  )}
+                </View>
+              ) : (
+                <View style={[styles.emptySeat, isYou && styles.youSeat]}>
+                  {isYou ? <UserPlus size={20} color={color.brand} /> : null}
+                </View>
+              )}
+              <Copy size={12} weight={isYou ? 800 : 600} tint={isYou ? color.brand : member ? color.navy : color.muted} numberOfLines={1}>
+                {member ? member.first_name : isYou ? 'You' : 'Open'}
+              </Copy>
+            </Pile>
+          );
+        })}
+      </Row>
+      {isLastSeat && (
+        <Row gap={6} style={styles.lastSeatNote}>
+          <Flame size={14} color={color.brand} />
+          <Copy size={12} weight={700} tint={color.brand}>Last seat sends the car and earns you +30 pts</Copy>
+        </Row>
+      )}
+
+      {mapPoints.length > 0 && (
+        <View style={{ marginTop: 18 }}>
+          <RideMap points={mapPoints} polyline={campus?.corridor_polyline} height={170} numbered />
+        </View>
+      )}
+
+      {/* Fare split by distance */}
+      <Row style={[spread, { marginTop: 22 }]}>
+        <Copy accessibilityRole="header" size={16} weight={800} tint={color.navy}>Fare split</Copy>
+        <Copy size={13} weight={700} tint={color.muted}>by distance</Copy>
+      </Row>
+      <View style={styles.fareList}>
+        {locked.map((seat, idx) => (
+          <Row key={`${seat.first_name}-${idx}`} style={[spread, styles.fareRow]}>
+            <Copy size={14} tint={color.navy} style={fill} numberOfLines={1}>{seat.first_name}</Copy>
+            <Copy size={12} tint={color.muted} style={{ marginRight: 12 }}>{`${Number(seat.km).toFixed(1)} km`}</Copy>
+            <Copy size={14} weight={700} tint={color.navy}>{formatFils(Number(seat.fare_fils))}</Copy>
           </Row>
         ))}
-        {left > 0 && (
-          <Row style={[styles.member, styles.openSeat]}>
-            <Tile icon={UserPlus} size={34} iconSize={18} background="transparent" style={styles.emptyAvatar} />
-            <Copy size={11} weight={800} tint={color.brand}>This seat could be yours</Copy>
+        <Row style={[spread, styles.fareRow, styles.fareYou]}>
+          <Copy size={14} weight={800} tint={color.brand} style={fill}>You</Copy>
+          {youKm != null && <Copy size={12} tint={color.brand} style={{ marginRight: 12 }}>{`${youKm.toFixed(1)} km`}</Copy>}
+          <Copy size={14} weight={800} tint={color.brand}>{formatFils(youFare)}</Copy>
+        </Row>
+        {openRemainder > 0 && (
+          <Row style={[spread, styles.fareRow]}>
+            <Copy size={14} tint={color.muted} style={fill}>Open seats</Copy>
+            <Copy size={14} tint={color.muted}>{formatFils(openRemainder)}</Copy>
           </Row>
         )}
+        <Row style={[spread, styles.fareRow, { borderBottomWidth: 0 }]}>
+          <Copy size={14} weight={700} tint={color.navy} style={fill}>Car total</Copy>
+          <Copy size={14} weight={800} tint={color.navy}>{formatFils(data.group_fare_fils)}</Copy>
+        </Row>
       </View>
-      <Row gap={0} style={styles.fare}>
-        <Fare label="Your fare" value={formatFils(data.fare_fils)} />
-        <Fare label="Total car fare cap" value={formatFils(data.fare_cap_fils)} />
+
+      <Row gap={8} style={{ marginTop: 16 }}>
+        <ShieldCheck size={16} color={freeCancel ? color.emerald : color.amber} />
+        <Copy size={13} tint={color.muted} style={fill}>
+          {freeCancel
+            ? `Free cancel until ${formatDate(cutoff)}, ${formatTime(cutoff)}`
+            : 'Seat locked — under 12h to pickup'}
+        </Copy>
       </Row>
-      <Card style={styles.policy}>
-        <Row gap={8} style={{ marginBottom: 3 }}><ShieldCheck size={19} color="#5F552F" /><Copy weight={800} tint="#5F552F">Cancellation policy</Copy></Row>
-        <PolicyRow icon={Check} label="12+ hours before: " outcome="full refund" />
-        <PolicyRow icon={X} label="Less than 12 hours: " outcome="no refund" />
-        <PolicyRow icon={LockKeyhole} label="After trip starts: cancellation unavailable" />
-      </Card>
-      <Button onPress={() => router.push({ pathname: '/summary', params: {
-        groupId: data.group_id, requestId, routeVersion: String(data.route_version), pickupAreaId: data.pickup_area_id,
-      } })} disabled={data.full || data.over_cap} style={styles.action}>{`Book & prepay · ${formatFils(data.fare_fils)}`}</Button>
     </Page>
   );
+}
+
+function slotStat(stats: DemandStat[] | null | undefined, classTime: string) {
+  if (!stats) return undefined;
+  const [hour, minute] = classTime.split(':').map(Number);
+  const total = hour * 60 + minute - 10;
+  const key = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  return stats.find((stat) => stat.stat_type === 'class_slot' && stat.entity_key === key);
 }
 
 export function RouteTitle({ light = false, marginTop = 10, pickup, destination }: {
   light?: boolean; marginTop?: number; pickup: string; destination: string;
 }) {
   const tint = light ? color.white : color.navy;
-  return <Row gap={8} style={{ marginTop, marginBottom: 6, flexWrap: 'wrap' }}>
-    <Copy size={17} weight={800} tint={tint}>{pickup}</Copy><ArrowRight size={19} color={tint} /><Copy size={17} weight={800} tint={tint}>{destination}</Copy>
-  </Row>;
-}
-
-function SeatStat({ number, label }: { number: string; label: string }) {
-  return <Pile gap={3} style={styles.stat}><Copy size={18} weight={800}>{number}</Copy><Copy size={8} tint={color.muted}>{label}</Copy></Pile>;
-}
-
-function Fare({ label, value }: { label: string; value: string }) {
-  return <Pile gap={5} style={[styles.farePart, label === 'Your fare' && styles.fareDivider]}>
-    <Copy size={8} tint={color.muted}>{label}</Copy><Copy size={13} weight={800}>{value}</Copy>
-  </Pile>;
-}
-
-function PolicyRow({ icon: Icon, label, outcome }: { icon: typeof Check; label: string; outcome?: string }) {
-  return <Row gap={8}><Icon size={16} color="#5F552F" /><Copy size={9} tint="#5F552F" style={fill}>
-    {label}{outcome && <Copy size={9} weight={800} tint="#5F552F">{outcome}</Copy>}
-  </Copy></Row>;
+  return (
+    <Row gap={8} style={{ marginTop, marginBottom: 4, flexWrap: 'wrap' }}>
+      <Copy size={17} weight={800} tint={tint}>{pickup}</Copy>
+      <ArrowRight size={18} color={light ? '#FF8AC4' : color.brand} />
+      <Copy size={17} weight={800} tint={tint}>{destination}</Copy>
+    </Row>
+  );
 }
 
 const styles = StyleSheet.create({
-  campusOption: { minHeight: 56, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  activeCampus: { backgroundColor: color.pink },
-  scheduleCell: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2, backgroundColor: color.soft, borderRadius: 9 },
-  selectedCell: { backgroundColor: color.brand },
-  inputCard: { padding: 0, borderRadius: 17, marginVertical: 15 },
-  divider: { borderBottomWidth: 1, borderBottomColor: color.line },
-  map: { height: 176, borderRadius: 18, overflow: 'hidden', backgroundColor: '#E8EFEA' },
-  pickupPin: { position: 'absolute', left: '18%', top: 101 },
-  campusPin: { position: 'absolute', right: '18%', top: 32, width: 30, height: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: color.navy, borderWidth: 3, borderColor: color.white, borderRadius: 9, ...shadow(4, 10, '#837A91') },
-  mapLabel: { position: 'absolute', left: 34, top: 130, backgroundColor: color.white, borderRadius: 5, paddingVertical: 3, paddingHorizontal: 5 },
-  campusLabel: { position: 'absolute', right: 58, top: 67, backgroundColor: color.white, borderRadius: 5, paddingVertical: 3, paddingHorizontal: 5 },
-  recenter: { position: 'absolute', right: 9, bottom: 9, backgroundColor: color.white, borderRadius: 9, paddingVertical: 7, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 5, ...shadow(3, 10, '#14322D1F') },
-  softNote: { backgroundColor: color.pink, marginTop: 12 },
-  action: { marginTop: 24 },
-  aiHero: { alignItems: 'center', paddingTop: 22, paddingBottom: 25 },
-  aiOrb: { marginBottom: 8, borderRadius: 22, boxShadow: '0px 0px 0px 9px #E9E2FF73' },
-  centered: { alignSelf: 'center' },
-  timing: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderColor: '#ECE7FA', paddingVertical: 17, paddingHorizontal: 15, borderRadius: 16 },
-  timingLine: { width: '10%', height: 1, backgroundColor: '#DCD5EE' },
-  facts: { marginVertical: 14, padding: 15, borderRadius: 16, backgroundColor: '#F4F9F7' },
-  probability: { marginVertical: 14, padding: 15, borderRadius: 16, backgroundColor: '#F4F9F7' },
-  ring: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center' },
-  routeSummary: { padding: 13, borderRadius: 14, backgroundColor: color.sage },
-  campusDot: { width: 26, height: 26, borderRadius: 8, backgroundColor: '#163A42', alignItems: 'center', justifyContent: 'center' },
-  filters: { marginTop: 15, marginBottom: 15 },
-  filter: { flex: 1, alignItems: 'center', paddingHorizontal: 5, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: color.line },
-  filterSelected: { backgroundColor: color.pink, borderColor: color.brand },
-  empty: { paddingVertical: 44, paddingHorizontal: 12 },
-  emptyIcon: { alignSelf: 'center', width: 85, height: 85, borderRadius: 29, backgroundColor: '#F0F4F3', alignItems: 'center', justifyContent: 'center', marginBottom: 11 },
-  questionMark: { position: 'absolute', right: 15, top: 12 },
-  groupCard: { borderWidth: 1, borderColor: color.line, borderRadius: 19, padding: 16, backgroundColor: color.white },
-  featured: { paddingTop: 32, overflow: 'hidden', borderColor: '#EF8FBE', ...shadow(12, 28, '#5F27651A') },
-  bestMatch: { position: 'absolute', right: 0, top: 0, paddingVertical: 7, paddingHorizontal: 10, backgroundColor: color.pink },
-  seats: { marginTop: 18, marginBottom: 13 },
-  seat: { width: 33, height: 33, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderStyle: 'dashed', borderColor: '#AAB7B4' },
-  matchFacts: { borderTopWidth: 1, borderTopColor: color.line, paddingTop: 12 },
-  onTime: { padding: 10, marginTop: 12, borderRadius: 10, backgroundColor: '#F3EFFF' },
-  compactGroup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  seatSummary: { paddingVertical: 17 },
-  stat: { flex: 1, alignItems: 'center' },
-  seatDivider: { height: 29, width: 1, backgroundColor: color.line },
-  memberList: { borderWidth: 1, borderColor: color.line, borderRadius: 16, overflow: 'hidden' },
-  member: { minHeight: 52, paddingHorizontal: 11, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: color.line },
-  openSeat: { backgroundColor: '#F8FAF9', borderBottomWidth: 0 },
-  emptyAvatar: { borderRadius: 17, borderWidth: 1, borderStyle: 'dashed', borderColor: color.brand },
-  fare: { marginVertical: 13, borderWidth: 1, borderColor: color.line, borderRadius: 14 },
-  farePart: { flex: 1, paddingVertical: 13, paddingHorizontal: 15 },
-  fareDivider: { borderRightWidth: 1, borderRightColor: color.line },
-  policy: { gap: 8, padding: 15, borderWidth: 0, borderRadius: 15, backgroundColor: '#FFF9E8' },
+  tripCard: {
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: color.white,
+    borderWidth: 1,
+    borderColor: color.line,
+    ...shadow(6, 18, '#271C3A10'),
+  },
+  tripRail: { alignItems: 'center', alignSelf: 'stretch', paddingVertical: 11 },
+  tripDotFrom: { width: 12, height: 12, borderRadius: 6, borderWidth: 3, borderColor: color.brand, backgroundColor: color.white },
+  tripLine: { width: 2, flex: 1, backgroundColor: color.line, marginVertical: 4 },
+  tripDotTo: { width: 12, height: 12, borderRadius: 3, backgroundColor: color.navy },
+  seatRow: { marginTop: 12, justifyContent: 'space-between' },
+  seat: { flex: 1, alignItems: 'center' },
+  seatCheck: {
+    position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10,
+    backgroundColor: color.white, alignItems: 'center', justifyContent: 'center',
+  },
+  emptySeat: {
+    width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: color.line, alignItems: 'center', justifyContent: 'center',
+  },
+  youSeat: { borderColor: color.brand, backgroundColor: color.pink },
+  lastSeatNote: {
+    marginTop: 14, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: color.pink,
+  },
+  fareList: {
+    marginTop: 10, borderRadius: 18, borderWidth: 1, borderColor: color.line, paddingHorizontal: 14,
+    backgroundColor: color.white,
+  },
+  fareRow: { minHeight: 48, borderBottomWidth: 1, borderBottomColor: color.line },
+  fareYou: { },
+  sourceChip: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 999,
+    backgroundColor: color.soft,
+    borderWidth: 1,
+    borderColor: color.line,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+  },
+  sourceChipActive: {
+    borderColor: color.brand,
+    backgroundColor: '#FFF5FA',
+  },
+  dayStrip: { gap: 8, paddingVertical: 4 },
+  dayPill: {
+    width: 66,
+    minHeight: 76,
+    borderRadius: 18,
+    backgroundColor: color.soft,
+    borderWidth: 1,
+    borderColor: color.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  dayPillSelected: {
+    backgroundColor: color.navy,
+    borderColor: color.navy,
+  },
+  timeStrip: { gap: 8, paddingVertical: 4 },
+  timeChip: {
+    minWidth: 102,
+    minHeight: 58,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: color.pink,
+    borderWidth: 1,
+    borderColor: color.pinkBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  timeChipOn: {
+    backgroundColor: color.brand,
+    borderColor: color.brand,
+  },
+  arrivalPreviewCard: {
+    marginTop: 14,
+    backgroundColor: '#FAF7FC',
+    borderColor: color.line,
+  },
+  calCell: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: color.soft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calWeekend: {
+    backgroundColor: '#F4EFF7',
+    opacity: 0.55,
+  },
+  calSelected: {
+    backgroundColor: color.brand,
+  },
+  slotGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  slotCard: {
+    width: '31%',
+    minHeight: 58,
+    borderRadius: 16,
+    backgroundColor: color.soft,
+    borderWidth: 1,
+    borderColor: color.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: 2,
+  },
+  slotCardActive: {
+    backgroundColor: color.brand,
+    borderColor: color.brand,
+  },
+  aiCard: {
+    backgroundColor: color.navy,
+    borderRadius: 24,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#3E2D59',
+    ...shadow(10, 24, '#271C3A29'),
+  },
+  sectionLabel: { marginTop: 26, marginBottom: 10, letterSpacing: 0.8 },
+  groupTile: {
+    borderRadius: 20, backgroundColor: color.white, borderWidth: 1, borderColor: color.line, overflow: 'hidden',
+  },
+  groupTileOn: { borderWidth: 2, borderColor: color.brand, ...shadow(8, 20, '#E9007618') },
+  groupTileBody: { padding: 16 },
+  groupTileStrip: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: color.pink },
+  seatPip: { width: 22, height: 8, borderRadius: 4, backgroundColor: color.line },
+  seatPipOn: { backgroundColor: color.brand },
+  newGroupTile: {
+    marginTop: 12, minHeight: 56, borderRadius: 20, borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: color.pinkBorder, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  aiLeaveTime: { letterSpacing: -2.5, lineHeight: 62 },
+  aiTrack: {
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: '#43325E',
+    overflow: 'hidden',
+  },
+  aiTrackFill: {
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: color.brand,
+  },
 });

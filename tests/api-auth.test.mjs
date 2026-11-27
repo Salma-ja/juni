@@ -24,7 +24,7 @@ after(async () => {
 const post = (path, body = {}, token) =>
   fetch(`${base}/api/${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(process.env.JUNI_REHEARSAL_PIN ? { 'x-rehearsal-key': process.env.JUNI_REHEARSAL_PIN } : {}) },
     body: JSON.stringify(body),
   }).then(async (r) => ({ status: r.status, body: await r.json() }));
 
@@ -53,9 +53,9 @@ test('demo claim creates a verified demo profile and session; me and signout wor
   assert.equal(me.body.data.fullName, 'zz-test Salma');
 
   const areas = await post('pickup-areas', {}, token);
-  assert.equal(areas.body.data.length, 8);
+  assert.equal(areas.body.data.length, 12);
   const campuses = await post('campuses', {}, token);
-  assert.equal(campuses.body.data.length, 3);
+  assert.equal(campuses.body.data.length, 5);
 
   assert.equal((await post('signout', {}, token)).status, 200);
   assert.equal((await post('me', {}, token)).body.code, 'NO_SESSION');

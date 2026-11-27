@@ -5,17 +5,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { color, font, spacing } from '@/theme';
 
 function tabIcon(Icon: LucideIcon) {
-  return ({ color: tint }: { color: string }) => <Icon size={21} color={tint} />;
+  return ({ color: tint }: { color: string }) => <Icon size={22} color={tint} />;
 }
 
 export default function CaptainLayout() {
   const { bottom } = useSafeAreaInsets();
   return (
     <Tabs initialRouteName="driver" screenOptions={{
-      headerShown: false, animation: 'fade',
-      tabBarActiveTintColor: color.brand, tabBarInactiveTintColor: '#82908F',
-      tabBarLabelPosition: 'below-icon', tabBarLabelStyle: styles.label, tabBarItemStyle: styles.tab,
-      tabBarStyle: [styles.bar, { height: spacing.tabBar + bottom }], tabBarHideOnKeyboard: true,
+      headerShown: false,
+      animation: 'fade',
+      tabBarActiveTintColor: color.brand,
+      tabBarInactiveTintColor: color.muted,
+      tabBarLabelPosition: 'below-icon',
+      tabBarLabelStyle: styles.label,
+      tabBarItemStyle: styles.tab,
+      tabBarStyle: [styles.bar, { height: spacing.tabBar + bottom }],
+      tabBarHideOnKeyboard: true,
     }}>
       <Tabs.Screen name="driver" options={{ title: 'Trips', tabBarIcon: tabIcon(Route) }} />
       <Tabs.Screen name="driver-earnings" options={{ title: 'Earnings', tabBarIcon: tabIcon(Wallet) }} />
@@ -26,7 +31,14 @@ export default function CaptainLayout() {
 }
 
 const styles = StyleSheet.create({
-  bar: { backgroundColor: color.white, borderTopColor: color.line, paddingHorizontal: 14, paddingTop: 10, elevation: 0 },
-  tab: { paddingBottom: 8 },
-  label: { fontFamily: font[650], fontSize: 9 },
+  bar: {
+    backgroundColor: color.white,
+    borderTopColor: color.line,
+    borderTopWidth: 1,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    elevation: 8,
+  },
+  tab: { paddingBottom: 6, minHeight: 48 },
+  label: { fontFamily: font[700], fontSize: 12 },
 });

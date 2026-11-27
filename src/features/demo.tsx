@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { BottomSheet, Badge, Button, Card, Copy, Eyebrow, Header, Page, Pile, Row, spread } from '@/components/ui';
+import { Badge, BottomSheet, Button, Card, Copy, Eyebrow, Header, Page, Pile, Row, spread } from '@/components/ui';
 import {
   demoAssignCaptain, demoCompleteTrip, demoConfirmCaptain, demoExpireHold, demoLastSeatGroups, demoReleaseHold,
   demoReset, demoSeedCheckout, demoSet, demoSettings, demoStartTrip, myBookings, startCheckout,
@@ -49,7 +49,6 @@ export function DemoPanel() {
   const live = [...(bookings?.upcoming ?? []), ...(bookings?.active ?? [])];
   const current: BookingData | undefined = live.find((b) => b.id === selected) ?? live[0];
 
-  /** Run one action, show its result or error copy inline, then refresh the panel. */
   async function run(key: string, action: () => Promise<{ ok: boolean; code?: string }>, okText: string) {
     if (busy) return;
     setBusy(key);
@@ -59,7 +58,7 @@ export function DemoPanel() {
     await refresh();
   }
   const Result = ({ k }: { k: string }) => outcome[k]
-    ? <Copy size={10} weight={700} tint={outcome[k].tone === 'ok' ? '#1D7A55' : color.danger}>{outcome[k].text}</Copy> : null;
+    ? <Copy size={12} weight={700} tint={outcome[k].tone === 'ok' ? color.emerald : color.danger}>{outcome[k].text}</Copy> : null;
 
   async function setClock(label: string, hoursBefore: number | null) {
     if (!current || !settings) return;
@@ -83,25 +82,24 @@ export function DemoPanel() {
         holdId: seed.ok ? seed.data.hold_id : undefined },
     ];
     setRace(rows);
-    // the winner's hold is released so the group stays at its seat count for the next demo
     await Promise.all(rows.filter((r) => r.holdId).map((r) => demoReleaseHold(r.holdId as string)));
     setBusy(null);
     await refresh();
   }
 
   const preset = (label: string, hours: number | null) => (
-    <Button key={label} tone="secondary" size={11} disabled={!current && hours !== null} onPress={() => setClock(label, hours)}>{label}</Button>
+    <Button key={label} tone="secondary" size={13} disabled={!current && hours !== null} onPress={() => setClock(label, hours)}>{label}</Button>
   );
 
   return (
     <Page>
-      <Header title="Demo controls" eyebrow="JUDGES ONLY" onBack={() => router.back()} />
-      <Copy size={10} tint={color.muted}>
+      <Header title="Demo controls" eyebrow="SIMULATION" onBack={() => router.back()} />
+      <Copy size={13} tint={color.muted}>
         {`Clock: ${settings ? `${formatDate(settings.appNow)} ${formatTime(settings.appNow)}` : '…'}${settings && settings.clockOffsetMinutes !== 0 ? ` (${formatOffset(settings.clockOffsetMinutes)})` : ''}`}
       </Copy>
 
       <Section title="MY BOOKINGS">
-        {live.length === 0 && <Copy size={11} tint={color.muted}>No upcoming rides. Book one first.</Copy>}
+        {live.length === 0 && <Copy size={13} tint={color.muted}>No upcoming rides. Book one first.</Copy>}
         {live.map((b) => {
           const picked = current?.id === b.id;
           const st = statusBadge[b.status];
@@ -110,21 +108,19 @@ export function DemoPanel() {
             <Card key={b.id} style={[styles.booking, picked && styles.picked]}>
               <Row style={spread}>
                 <Pile gap={3}>
-                  <Copy size={11} weight={800}>{`${b.code} · ${b.pickup_area.name} → ${b.campus.code}`}</Copy>
-                  <Copy size={9} tint={color.muted}>{`${formatDate(b.pickup_at)} · ${formatTime(b.pickup_at)} · ${b.seats_taken}/${b.capacity} seats`}</Copy>
+                  <Copy size={14} weight={800}>{`${b.code} · ${b.pickup_area.name} → ${b.campus.code}`}</Copy>
+                  <Copy size={12} tint={color.muted}>{`${formatDate(b.pickup_at)} · ${formatTime(b.pickup_at)} · ${b.seats_taken}/${b.capacity} seats`}</Copy>
                 </Pile>
                 <Badge tone={st.tone}>{st.label}</Badge>
               </Row>
-              <Row gap={6} style={styles.wrap}>
-                <Button size={10} tone="secondary" onPress={() => setSelected(b.id)}>{picked ? 'Selected' : 'Select for clock'}</Button>
-              </Row>
-              <Button size={11} disabled={!waiting} onPress={() => run(`confirm-${b.id}`, () => demoConfirmCaptain(b.id), 'Captain confirmed.')}>Confirm captain</Button>
+              <Button size={13} tone="secondary" onPress={() => setSelected(b.id)}>{picked ? 'Selected' : 'Select for clock'}</Button>
+              <Button size={13} disabled={!waiting} onPress={() => run(`confirm-${b.id}`, () => demoConfirmCaptain(b.id), 'Captain confirmed & riders notified.')}>Confirm captain</Button>
               <Result k={`confirm-${b.id}`} />
-              <Button size={11} tone="secondary" disabled={!waiting} onPress={() => run(`assign-${b.id}`, () => demoAssignCaptain(b.id, 'cap-6'), 'Assigned.')}>Try unlicensed captain</Button>
+              <Button size={13} tone="secondary" disabled={!waiting} onPress={() => run(`assign-${b.id}`, () => demoAssignCaptain(b.id, 'cap-6'), 'Assigned.')}>Try unlicensed captain</Button>
               <Result k={`assign-${b.id}`} />
               <Row gap={8}>
-                <View style={styles.half}><Button size={11} tone="secondary" disabled={b.status !== 'confirmed'} onPress={() => run(`start-${b.id}`, () => demoStartTrip(b.id), 'Trip started.')}>Start trip</Button></View>
-                <View style={styles.half}><Button size={11} tone="secondary" disabled={b.status !== 'in_progress'} onPress={() => run(`done-${b.id}`, () => demoCompleteTrip(b.id), 'Trip completed.')}>Complete trip</Button></View>
+                <View style={styles.half}><Button size={13} tone="secondary" disabled={b.status !== 'confirmed'} onPress={() => run(`start-${b.id}`, () => demoStartTrip(b.id), 'Trip started.')}>Start trip</Button></View>
+                <View style={styles.half}><Button size={13} tone="secondary" disabled={b.status !== 'in_progress'} onPress={() => run(`done-${b.id}`, () => demoCompleteTrip(b.id), 'Trip completed.')}>Complete trip</Button></View>
               </Row>
               <Result k={`start-${b.id}`} /><Result k={`done-${b.id}`} />
             </Card>
@@ -133,21 +129,21 @@ export function DemoPanel() {
       </Section>
 
       <Section title="CLOCK">
-        <Copy size={10} tint={color.muted}>
-          {current ? `Presets are relative to pickup ${formatDate(current.pickup_at)} ${formatTime(current.pickup_at)}.` : 'Select a booking to use the pickup presets.'}
+        <Copy size={13} tint={color.muted}>
+          {current ? `Presets are relative to pickup ${formatDate(current.pickup_at)} ${formatTime(current.pickup_at)}.` : 'Select a booking to use pickup presets.'}
         </Copy>
         {preset('13 h before', 13)}{preset('12 h before', 12)}{preset('10 h before', 10)}{preset('Now', null)}
         <Result k="clock" />
       </Section>
 
       <Section title="TOGGLES">
-        <Button tone={settings?.forceTravelOutage ? 'danger' : 'secondary'} size={11}
+        <Button tone={settings?.forceTravelOutage ? 'danger' : 'secondary'} size={13}
           onPress={() => run('outage', () => demoSet({ forceTravelOutage: !settings?.forceTravelOutage }),
-            settings?.forceTravelOutage ? 'Travel data restored.' : 'Travel data outage on: plans use the 45 min estimate.')}>
+            settings?.forceTravelOutage ? 'Travel data restored.' : 'Travel data outage on: plans use 45 min estimate.')}>
           {`Travel data outage: ${settings?.forceTravelOutage ? 'ON' : 'off'}`}
         </Button>
         <Result k="outage" />
-        <Button tone={settings?.forcePaymentFailure ? 'danger' : 'secondary'} size={11}
+        <Button tone={settings?.forcePaymentFailure ? 'danger' : 'secondary'} size={13}
           onPress={() => run('failpay', () => demoSet({ forcePaymentFailure: !settings?.forcePaymentFailure }),
             settings?.forcePaymentFailure ? 'Next payment will succeed.' : 'Next payment will fail.')}>
           {`Fail next payment: ${settings?.forcePaymentFailure ? 'ON' : 'off'}`}
@@ -156,28 +152,28 @@ export function DemoPanel() {
       </Section>
 
       <Section title="HOLDS">
-        <Button tone="secondary" size={11} disabled={!settings?.activeHoldId}
-          onPress={() => run('expire', () => demoExpireHold(settings?.activeHoldId ?? ''), 'Hold expired. Paying now shows the hold-ended message.')}>
+        <Button tone="secondary" size={13} disabled={!settings?.activeHoldId}
+          onPress={() => run('expire', () => demoExpireHold(settings?.activeHoldId ?? ''), 'Hold expired.')}>
           Expire my active hold
         </Button>
-        {!settings?.activeHoldId && <Copy size={10} tint={color.muted}>You have no active hold.</Copy>}
+        {!settings?.activeHoldId && <Copy size={12} tint={color.muted}>You have no active hold.</Copy>}
         <Result k="expire" />
       </Section>
 
       <Section title="RACE LAST SEAT">
-        {groups.length === 0 && <Copy size={10} tint={color.muted}>No group with exactly one seat left that you can join.</Copy>}
+        {groups.length === 0 && <Copy size={12} tint={color.muted}>No group with one seat left.</Copy>}
         {groups.map((g) => (
-          <Button key={g.group_id} tone="secondary" size={11} disabled={busy === 'race'} onPress={() => raceLastSeat(g)}>
-            {`${g.campus_code} · ${formatDate(g.departure_at)} ${formatTime(g.departure_at)} · ${g.pref === 'any' ? 'Any' : g.pref === 'girls_only' ? 'Girls-only' : 'Boys-only'} · ${g.seats_taken}/${g.capacity}`}
+          <Button key={g.group_id} tone="secondary" size={13} disabled={busy === 'race'} onPress={() => raceLastSeat(g)}>
+            {`${g.campus_code} · ${formatDate(g.departure_at)} ${formatTime(g.departure_at)} · ${g.seats_taken}/${g.capacity}`}
           </Button>
         ))}
         {race && (
           <Row gap={8} style={{ alignItems: 'flex-start' }}>
             {race.map((r) => (
               <Card key={r.who} style={[styles.half, styles.raceCard]}>
-                <Eyebrow size={8} tint={color.muted}>{r.who.toUpperCase()}</Eyebrow>
-                <Copy size={11} weight={800} tint={r.ok ? '#1D7A55' : color.danger}>{r.ok ? 'Success' : 'Blocked'}</Copy>
-                <Copy size={9} tint={color.muted}>{r.text}</Copy>
+                <Eyebrow tint={color.muted}>{r.who.toUpperCase()}</Eyebrow>
+                <Copy size={14} weight={800} tint={r.ok ? color.emerald : color.danger}>{r.ok ? 'Success' : 'Blocked'}</Copy>
+                <Copy size={12} tint={color.muted}>{r.text}</Copy>
               </Card>
             ))}
           </Row>
@@ -185,14 +181,14 @@ export function DemoPanel() {
       </Section>
 
       <Section title="RESET">
-        <Button tone="danger" size={11} onPress={() => setConfirmReset(true)}>Reset demo</Button>
+        <Button tone="danger" size={13} onPress={() => setConfirmReset(true)}>Reset demo</Button>
         <Result k="reset" />
       </Section>
 
       {confirmReset && (
         <BottomSheet onClose={() => setConfirmReset(false)}>
           <Copy accessibilityRole="header" size={20} weight={800}>Reset demo?</Copy>
-          <Copy size={12} tint={color.muted}>This removes your bookings, holds and requests, restores the clock, and reloads the seed groups.</Copy>
+          <Copy size={13} tint={color.muted}>Removes your demo bookings, holds, notifications & restores seed groups.</Copy>
           <Button tone="danger" onPress={async () => {
             setConfirmReset(false);
             await run('reset', () => demoReset(), 'Demo reset. Seed groups reloaded.');
@@ -204,15 +200,14 @@ export function DemoPanel() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <Pile gap={9} style={styles.section}><Eyebrow>{title}</Eyebrow>{children}</Pile>;
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return <Pile gap={10} style={styles.section}><Eyebrow>{title}</Eyebrow>{children}</Pile>;
 }
 
 const styles = StyleSheet.create({
   section: { marginTop: 18 },
-  booking: { gap: 9, padding: 13, borderRadius: 14 },
-  picked: { borderColor: color.brand },
-  wrap: { flexWrap: 'wrap' },
+  booking: { gap: 10, padding: 14, borderRadius: 18 },
+  picked: { borderColor: color.brand, borderWidth: 1.5 },
   half: { flex: 1 },
-  raceCard: { gap: 4, padding: 11 },
+  raceCard: { gap: 4, padding: 12 },
 });

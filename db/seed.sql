@@ -1,5 +1,5 @@
--- Idempotent seed. Removes every seed-owned row, then re-inserts. Run via scripts/seed.mjs.
--- Reference data (campuses, pickup areas, captains, vehicles) is owned by migration 0005.
+-- Idempotent seed. Removes every seed-owned row, then re-inserts across all 5 universities (JUST, YU, INU, UJ, AAU).
+-- Reference data (campuses, pickup areas, captains, vehicles) is owned by migrations 0005 & 0013.
 
 -- 1. Remove seed-owned data: groups created by seed riders and everything hanging off them.
 create temp table _seed_groups on commit drop as
@@ -8,6 +8,9 @@ create temp table _seed_bookings on commit drop as
   select b.id from bookings b
    where b.group_id in (select id from _seed_groups)
       or b.rider_id in (select id from profiles where is_seed);
+delete from notifications where group_id in (select id from _seed_groups) or booking_id in (select id from _seed_bookings);
+delete from points_ledger where booking_id in (select id from _seed_bookings);
+delete from captain_dispatch_audit where group_id in (select id from _seed_groups);
 delete from refunds   where booking_id in (select id from _seed_bookings);
 delete from incidents where group_id in (select id from _seed_groups) or booking_id in (select id from _seed_bookings);
 delete from payments  where booking_id in (select id from _seed_bookings)
@@ -20,23 +23,29 @@ delete from groups where id in (select id from _seed_groups);
 delete from ride_requests where rider_id in (select id from profiles where is_seed);
 delete from profiles where is_seed;
 
--- 2. Seed riders (handoff §7.4).
+-- 2. Seed riders (verified female & male students across corridors).
 insert into profiles (full_name, gender, verified, is_seed) values
-  ('Lina A.',   'female', true, true),
-  ('Rama K.',   'female', true, true),
-  ('Noor M.',   'female', true, true),
-  ('Dana S.',   'female', true, true),
-  ('Haya T.',   'female', true, true),
-  ('Sara B.',   'female', true, true),
-  ('Khaled R.', 'male',   true, true),
-  ('Mahmoud J.','male',   true, true),
-  ('Zaid F.',   'male',   true, true),
-  ('Hamza Q.',  'male',   true, true),
-  ('Ali N.',    'male',   true, true),
-  ('Yousef H.', 'male',   true, true);
+  ('Lina A.',    'female', true, true),
+  ('Rama K.',    'female', true, true),
+  ('Noor M.',    'female', true, true),
+  ('Dana S.',    'female', true, true),
+  ('Haya T.',    'female', true, true),
+  ('Sara B.',    'female', true, true),
+  ('Maya Z.',    'female', true, true),
+  ('Leen K.',    'female', true, true),
+  ('Aya M.',     'female', true, true),
+  ('Khaled R.',  'male',   true, true),
+  ('Mahmoud J.', 'male',   true, true),
+  ('Zaid F.',    'male',   true, true),
+  ('Hamza Q.',   'male',   true, true),
+  ('Ali N.',     'male',   true, true),
+  ('Yousef H.',  'male',   true, true),
+  ('Tariq S.',   'male',   true, true),
+  ('Sami D.',    'male',   true, true),
+  ('Kareem B.',  'male',   true, true);
 
--- 3. Seed groups (handoff §7.5): next 5 working days (Sun-Thu, Asia/Amman) x each campus x 6 groups.
--- Members are booked through core.create_request / create_group / start_checkout / pay with p_now = now().
+-- 3. Seed multiple gender-isolated groups (Girls-only & Boys-only, including 3/4 Last-Seat +30pt groups)
+-- across next 5 working days (Sun-Thu, Asia/Amman) x all 5 campuses (JUST, Yarmouk, INU, UJ, AAU).
 do $seed$
 declare
   today date := (now() at time zone 'Asia/Amman')::date;
@@ -45,14 +54,32 @@ declare
   found_days int := 0;
   camp record;
   spec jsonb;
-  specs jsonb := '[
+  irbid_specs jsonb := '[
     {"time":"07:50","pref":"girls_only","members":[["Lina A.","hawara"],["Rama K.","hawara"],["Noor M.","al-husn"]]},
-    {"time":"07:50","pref":"any","members":[["Khaled R.","sareeh"],["Dana S.","aidoun"],["Yousef H.","sareeh"]]},
-    {"time":"07:50","pref":"boys_only","members":[["Mahmoud J.","ramtha"]]},
-    {"time":"08:50","pref":"any","members":[["Haya T.","irbid-downtown"],["Zaid F.","university-st"],["Hamza Q.","hawara"],["Ali N.","sareeh"]]},
-    {"time":"09:50","pref":"girls_only","members":[["Sara B.","jerash"]]},
-    {"time":"10:50","pref":"boys_only","members":[["Yousef H.","hawara"]]}
+    {"time":"07:45","pref":"girls_only","members":[["Dana S.","aidoun"],["Haya T.","sareeh"],["Maya Z.","university-st"]]},
+    {"time":"07:53","pref":"girls_only","members":[["Leen K.","irbid-downtown"],["Aya M.","university-st"]]},
+    {"time":"07:50","pref":"boys_only","members":[["Khaled R.","sareeh"],["Tariq S.","hawara"],["Sami D.","aidoun"]]},
+    {"time":"07:46","pref":"boys_only","members":[["Mahmoud J.","ramtha"],["Kareem B.","hawara"]]},
+    {"time":"08:50","pref":"girls_only","members":[["Sara B.","hawara"],["Dana S.","sareeh"],["Maya Z.","al-husn"]]},
+    {"time":"08:50","pref":"boys_only","members":[["Zaid F.","university-st"],["Hamza Q.","hawara"],["Ali N.","sareeh"],["Yousef H.","sareeh"]]},
+    {"time":"09:50","pref":"girls_only","members":[["Sara B.","jerash"],["Leen K.","al-husn"]]},
+    {"time":"09:50","pref":"boys_only","members":[["Tariq S.","irbid-downtown"],["Kareem B.","university-st"],["Sami D.","sareeh"]]},
+    {"time":"10:50","pref":"girls_only","members":[["Aya M.","hawara"],["Haya T.","university-st"],["Noor M.","sareeh"]]},
+    {"time":"12:50","pref":"boys_only","members":[["Khaled R.","hawara"],["Mahmoud J.","sareeh"]]}
   ]'::jsonb;
+  amman_specs jsonb := '[
+    {"time":"07:50","pref":"girls_only","members":[["Lina A.","sweileh"],["Rama K.","jubaiha"],["Noor M.","khalda"]]},
+    {"time":"07:45","pref":"girls_only","members":[["Dana S.","tabarbour"],["Haya T.","jubaiha"]]},
+    {"time":"07:53","pref":"girls_only","members":[["Maya Z.","sweileh"],["Leen K.","khalda"],["Aya M.","sweileh"]]},
+    {"time":"07:50","pref":"boys_only","members":[["Khaled R.","sweileh"],["Tariq S.","jubaiha"],["Sami D.","khalda"]]},
+    {"time":"07:46","pref":"boys_only","members":[["Mahmoud J.","tabarbour"],["Kareem B.","jubaiha"]]},
+    {"time":"08:50","pref":"girls_only","members":[["Sara B.","khalda"],["Dana S.","sweileh"],["Leen K.","jubaiha"]]},
+    {"time":"08:50","pref":"boys_only","members":[["Zaid F.","sweileh"],["Hamza Q.","jubaiha"],["Ali N.","khalda"],["Yousef H.","sweileh"]]},
+    {"time":"09:50","pref":"girls_only","members":[["Aya M.","tabarbour"],["Maya Z.","jubaiha"]]},
+    {"time":"10:50","pref":"girls_only","members":[["Haya T.","sweileh"],["Noor M.","khalda"],["Sara B.","jubaiha"]]},
+    {"time":"12:50","pref":"boys_only","members":[["Khaled R.","sweileh"],["Tariq S.","tabarbour"]]}
+  ]'::jsonb;
+  active_specs jsonb;
   m jsonb;
   i int;
   arrival timestamptz;
@@ -68,8 +95,9 @@ begin
     d := today + k;
     if extract(dow from d) in (0, 1, 2, 3, 4) then           -- Sunday to Thursday
       found_days := found_days + 1;
-      for camp in select id from campuses order by case id when 'just' then 1 when 'yarmouk' then 2 else 3 end loop
-        for spec in select * from jsonb_array_elements(specs) loop
+      for camp in select id, corridor from campuses order by case id when 'just' then 1 when 'yarmouk' then 2 when 'inu' then 3 when 'uj' then 4 else 5 end loop
+        active_specs := case when camp.corridor = 'amman' then amman_specs else irbid_specs end;
+        for spec in select * from jsonb_array_elements(active_specs) loop
           arrival := ((d::text || ' ' || (spec->>'time'))::timestamp) at time zone 'Asia/Amman';
           i := 0;
           gid := null;
@@ -84,10 +112,15 @@ begin
             hold := core.start_checkout(rider, gid, m->>1, rv, gen_random_uuid(), now());
             perform core.pay(rider, (hold->>'hold_id')::uuid, 'success', gen_random_uuid(), now());
           end loop;
-          -- The 08:50 group fills at seed time and pay auto-assigns the lowest free captain. Reassign from the
-          -- highest ids (cap-4, cap-3, cap-2 by campus) so cap-1 stays free for the 07:50 demo group.
-          if (spec->>'time') = '08:50' then
-            cap := case camp.id when 'just' then 'cap-4' when 'yarmouk' then 'cap-3' else 'cap-2' end;
+          -- Keep cap-1 (Omar) & cap-9 free for live bookings & decline reassignments by assigning 08:50 full boys runs to dedicated captains
+          if (spec->>'time') = '08:50' and (spec->>'pref') = 'boys_only' then
+            cap := case camp.id
+              when 'just' then 'cap-4'
+              when 'yarmouk' then 'cap-3'
+              when 'inu' then 'cap-2'
+              when 'uj' then 'cap-8'
+              else 'cap-7'
+            end;
             update groups set captain_id = null, vehicle_id = null where id = gid;
             perform core.assign_captain(gid, cap, 'veh-' || substr(cap, 5), now());
           end if;

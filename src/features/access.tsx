@@ -1,172 +1,265 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Redirect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Car, CheckCircle2, GraduationCap, ShieldCheck, Sparkles } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BottomSheet, Button, center, Copy, Eyebrow, fill, Logo, Page, Pile, Row, TextLink } from '@/components/ui';
-import { color } from '@/theme';
-import { claimCaptain, claimPersona, config, type Gender } from '@/data/api';
+import { Badge, Button, Card, center, Copy, Eyebrow, fill, Logo, Page, Pile, PulseDot, Row, ScalePressable, spread, Tile } from '@/components/ui';
+import { DRIVER, RIDER } from '@/features/accounts';
 import { useAuth } from '@/features/authSession';
+import { useLocationPref } from '@/features/locationState';
+import { color, shadow } from '@/theme';
 
+const NATIVE_DRIVER = Platform.OS !== 'web';
+
+/**
+ * Jeeny App Host Frame + Figma 00a-00d Animated Concentric Ring Entry.
+ * Shows how JUNI lives natively inside Jeeny's service tray — never a standalone marketing website.
+ */
 export function Splash() {
   const router = useRouter();
-  const { width } = useWindowDimensions();
   const { ready, canEnter, profile } = useAuth();
-  const destination = canEnter ? (profile?.role === 'captain' ? '/driver' : '/home') : '/login';
+  const { pickup, campus } = useLocationPref();
+  const ringAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    if (!ready) return;
-    const timer = setTimeout(() => router.replace(destination), canEnter ? 0 : 3200);
-    return () => clearTimeout(timer);
-  }, [canEnter, destination, ready, router]);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(ringAnim, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.quad), useNativeDriver: NATIVE_DRIVER }),
+        Animated.timing(ringAnim, { toValue: 0, duration: 1800, easing: Easing.inOut(Easing.quad), useNativeDriver: NATIVE_DRIVER }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [ringAnim]);
+
+  const destination = canEnter ? (profile?.role === 'captain' ? '/driver' : '/home') : '/login';
+  function openJuni() {
+    if (ready) router.replace(destination);
+  }
 
   return (
-    <LinearGradient colors={['#3A2758', '#2B2142', '#201731']} locations={[0, 0.58, 1]}
-      start={{ x: 0.24, y: 0 }} end={{ x: 0.85, y: 1 }} style={fill}>
+    <LinearGradient
+      colors={['#2E1F47', '#271C3A', '#1B122B']}
+      locations={[0, 0.55, 1]}
+      style={fill}
+    >
       <StatusBar style="light" />
       <SafeAreaView style={fill}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Tap to continue"
-          onPress={() => { if (ready) router.replace(destination); }} style={styles.splash}>
-          <View pointerEvents="none" style={[styles.orbit, styles.orbitLarge]} />
-          <View pointerEvents="none" style={[styles.orbit, styles.orbitSmall]} />
-          <View style={styles.splashLogo}><Logo light splash /></View>
-          <Pile gap={13}>
-            <Copy accessibilityRole="header" size={Math.max(34, Math.min(width / 10, 46))}
-              weight={800} tint={color.white} style={styles.splashTitle}>Smart university carpooling.</Copy>
-            <Copy size={15} tint="#FFFFFFB8" style={{ lineHeight: 24 }}>Safer rides. Better matches. Campus on time.</Copy>
-          </Pile>
-          <Copy size={11} tint="#FFFFFF8C" style={{ letterSpacing: 1.65 }}>TAP TO CONTINUE</Copy>
-        </Pressable>
+        <View style={styles.splashTop}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.ringOuter,
+              {
+                opacity: ringAnim.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.5] }),
+                transform: [{ scale: ringAnim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1.08] }) }],
+              },
+            ]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.ringInner,
+              {
+                opacity: ringAnim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.75] }),
+                transform: [{ scale: ringAnim.interpolate({ inputRange: [0, 1], outputRange: [1.04, 0.95] }) }],
+              },
+            ]}
+          />
+
+          <Row gap={8} style={styles.jeenyHostBadge}>
+            <PulseDot tint="#FF5BB5" size={7} />
+            <Copy size={12} weight={700} tint="#FFD1E8">Jeeny App · Campus Services</Copy>
+          </Row>
+
+          <View style={{ marginVertical: 20 }}>
+            <Logo light splash />
+          </View>
+          <Copy size={15} weight={600} tint="#E0D5F2" style={center}>
+            Book your university seat like a flight
+          </Copy>
+        </View>
+
+        <View style={styles.serviceTray}>
+          <View style={styles.trayHandle} />
+          <Row style={spread}>
+            <Pile gap={2}>
+              <Copy size={12} weight={700} tint={color.muted}>JEENY RIDE OPTIONS</Copy>
+              <Copy size={16} weight={800} tint={color.navy}>
+                {`${pickup?.name ?? 'Hawara'} → ${campus?.code ?? 'JUST'}`}
+              </Copy>
+            </Pile>
+            <Badge tone="brand">5 Universities</Badge>
+          </Row>
+
+          <Row style={styles.mutedService}>
+            <Tile icon={Car} size={40} iconSize={18} background={color.soft} tint={color.muted} />
+            <Pile gap={2} style={fill}>
+              <Copy size={14} weight={700} tint={color.muted}>Economy</Copy>
+              <Copy size={12} tint={color.muted}>On-demand · Solo car</Copy>
+            </Pile>
+            <Copy size={14} weight={700} tint={color.muted}>~3.70 JD</Copy>
+          </Row>
+
+          <ScalePressable accessibilityLabel="Select JUNI Campus Pool" onPress={openJuni} style={styles.juniService}>
+            <Tile icon={GraduationCap} size={46} iconSize={22} background={color.brand} tint={color.white} />
+            <Pile gap={3} style={fill}>
+              <Row gap={6} style={{ flexWrap: 'wrap' }}>
+                <Copy size={15} weight={800} tint={color.navy}>JUNI Campus</Copy>
+                <Badge tone="brand">NEW</Badge>
+              </Row>
+              <Copy size={12} tint={color.muted}>Girls-only & Boys-only · +30 pts last seat</Copy>
+            </Pile>
+            <Pile gap={2} style={{ alignItems: 'flex-end' }}>
+              <Copy size={15} weight={800} tint={color.brand}>From 1.12 JD</Copy>
+              <Copy size={12} tint={color.emerald} weight={700}>Scheduled</Copy>
+            </Pile>
+          </ScalePressable>
+
+          <Button onPress={openJuni} trailingArrow style={{ marginTop: 4 }}>
+            Open JUNI Campus
+          </Button>
+        </View>
       </SafeAreaView>
     </LinearGradient>
   );
 }
 
 export function Login() {
-  const router = useRouter();
   return (
     <Page mode="auth">
       <Logo />
       <Pile gap={8} style={styles.authHeading}>
-        <Eyebrow>WELCOME BACK</Eyebrow>
-        <Copy accessibilityRole="header" size={28} weight={800} style={styles.title}>
-          Ready for your next ride?
+        <Eyebrow>VERIFIED CAMPUS ACCESS</Eyebrow>
+        <Copy accessibilityRole="header" size={28} weight={800} tint={color.navy} style={styles.title}>
+          Sign in with your Jeeny campus profile
         </Copy>
         <Copy size={14} tint={color.muted} style={styles.subtitle}>
-          Try JUNI with a demo student. No account or verification code needed.
+          Verified .edu.jo students across JUST, YU, INU, UJ & AAU ride in gender-isolated groups.
         </Copy>
       </Pile>
-      <Pile gap={15}>
-        <DemoAccess />
-      </Pile>
-      <Row gap={5} style={styles.authSwitch}>
-        <Copy size={13} tint={color.muted}>New to JUNI?</Copy>
-        <TextLink onPress={() => router.push('/register')} size={13}>Create account</TextLink>
-      </Row>
+
+      <DemoAccess />
+
+      <Card style={styles.trustCard}>
+        <Row gap={10}>
+          <ShieldCheck size={20} color={color.brand} />
+          <Copy size={12} tint={color.muted} style={fill}>
+            Verified via university .edu.jo mailbox + Jeeny phone OTP. Select a role above to continue.
+          </Copy>
+        </Row>
+      </Card>
     </Page>
   );
 }
 
-const personas: { gender: Gender; name: string; label: string }[] = [
-  { gender: 'female', name: 'Salma', label: 'Salma · Girls-only rides' },
-  { gender: 'male', name: 'Omar', label: 'Omar · Boys-only rides' },
-];
-
-const captains = [
-  { id: 'cap-1', label: 'Captain Omar Khalil · Toyota Prius' },
-  { id: 'cap-2', label: 'Captain Yazan Haddad · Hyundai Elantra' },
-  { id: 'cap-3', label: 'Captain Ahmad Rawashdeh · Kia Niro' },
-  { id: 'cap-4', label: 'Captain Faris Obeidat · Toyota Corolla' },
-] as const;
-
-/** "Continue as demo student": opens a sheet with two personas, claims a server session, enters the app. */
 export function DemoAccess() {
   const router = useRouter();
-  const { signInWithToken } = useAuth();
-  const [enabled, setEnabled] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
+  const { switchAccount } = useAuth();
+  const [busy, setBusy] = useState<'rider' | 'driver' | null>(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    let live = true;
-    config().then((res) => { if (live && res.ok) setEnabled(res.data.demoLoginEnabled); });
-    return () => { live = false; };
-  }, []);
-
-  async function chooseCaptain(captain: (typeof captains)[number]) {
+  async function choose(slot: 'rider' | 'driver') {
     if (busy) return;
-    setBusy(captain.id);
+    setBusy(slot);
     setError('');
-    const res = await claimCaptain(captain.id);
-    if (!res.ok) {
+    try {
+      await switchAccount(slot);
+      router.replace(slot === 'driver' ? '/driver' : '/home');
+    } catch {
+      setError('Could not connect. Please try again.');
+    } finally {
       setBusy(null);
-      setError('Something went wrong. Try again.');
-      return;
     }
-    await signInWithToken(res.data.token, res.data.profile);
-    setBusy(null);
-    setOpen(false);
-    router.replace('/driver');
   }
 
-  async function choose(persona: (typeof personas)[number]) {
-    if (busy) return;
-    setBusy(persona.gender);
-    setError('');
-    const res = await claimPersona(persona.gender, persona.name);
-    if (!res.ok) {
-      setBusy(null);
-      setError(res.code === 'DEMO_DISABLED' ? 'Demo login is turned off.' : 'Something went wrong. Try again.');
-      return;
-    }
-    await signInWithToken(res.data.token, res.data.profile);
-    setBusy(null);
-    setOpen(false);
-    router.replace('/home');
-  }
-
-  if (!enabled) return null;
   return (
-    <Pile gap={6}>
-      <Button onPress={() => setOpen(true)}>Continue as demo student</Button>
-      <Copy size={11} tint={color.muted} style={center}>Demo mode · simulated verification</Copy>
-      {open && (
-        <BottomSheet onClose={() => { if (!busy) setOpen(false); }}>
-          <Copy accessibilityRole="header" size={20} weight={800}>Choose a demo student</Copy>
-          <Copy size={13} tint={color.muted}>Each tap starts a fresh demo profile, so your bookings are yours alone.</Copy>
-          {personas.map((persona) => (
-            <Button key={persona.gender} tone="secondary" disabled={busy !== null} onPress={() => choose(persona)}>
-              {busy === persona.gender ? 'Starting…' : persona.label}
-            </Button>
-          ))}
-          <Copy size={12} weight={800} style={{ marginTop: 6 }}>Or try the driver app</Copy>
-          {captains.map((captain) => (
-            <Button key={captain.id} tone="secondary" disabled={busy !== null} onPress={() => chooseCaptain(captain)}>
-              {busy === captain.id ? 'Starting…' : captain.label}
-            </Button>
-          ))}
-          {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
-        </BottomSheet>
-      )}
+    <Pile gap={12}>
+      <Button icon={Sparkles} disabled={busy !== null} onPress={() => choose('rider')} trailingArrow>
+        {busy === 'rider' ? 'Signing in…' : `Continue as ${RIDER.name} (Student)`}
+      </Button>
+      <Button tone="dark" icon={CheckCircle2} disabled={busy !== null} onPress={() => choose('driver')}>
+        {busy === 'driver' ? 'Signing in…' : `Continue as ${DRIVER.name} (Captain)`}
+      </Button>
+      {!!error && <Copy accessibilityRole="alert" tint={color.danger} style={center}>{error}</Copy>}
     </Pile>
   );
 }
 
-/** The real OTP verification flow is out of scope for this build (handoff §6, §13). */
 export function Verification() {
   return <Redirect href="/login" />;
 }
 
 const styles = StyleSheet.create({
-  splash: { flex: 1, justifyContent: 'space-between', paddingHorizontal: 30, paddingTop: 60, paddingBottom: 32 },
-  splashLogo: { alignSelf: 'center' },
-  splashTitle: { letterSpacing: -1.9, maxWidth: 360, lineHeight: 44 },
-  orbit: { position: 'absolute', borderWidth: 1, borderColor: '#FFFFFF26', borderRadius: 999 },
-  orbitLarge: { width: 420, height: 420, right: -230, top: 85 },
-  orbitSmall: { width: 230, height: 230, right: -40, top: 180 },
-  authHeading: { marginTop: 54, marginBottom: 28 },
-  authSwitch: { justifyContent: 'center', marginTop: 'auto', paddingTop: 32 },
-  title: { lineHeight: 33, letterSpacing: -1.12 },
+  splashTop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  ringOuter: {
+    position: 'absolute',
+    width: 310,
+    height: 310,
+    borderRadius: 155,
+    borderWidth: 1.5,
+    borderColor: '#E9007666',
+  },
+  ringInner: {
+    position: 'absolute',
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    borderWidth: 1.5,
+    borderColor: '#FF77BC80',
+  },
+  jeenyHostBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#3B2959',
+    borderWidth: 1,
+    borderColor: '#563D7D',
+  },
+  serviceTray: {
+    backgroundColor: color.white,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 22,
+    gap: 12,
+    ...shadow(0, 30, '#00000040'),
+  },
+  trayHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 5,
+    backgroundColor: '#DDD6E8',
+    alignSelf: 'center',
+    marginBottom: 4,
+  },
+  mutedService: {
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: color.soft,
+    opacity: 0.72,
+    gap: 12,
+  },
+  juniService: {
+    padding: 14,
+    borderRadius: 20,
+    backgroundColor: '#FFF5FA',
+    borderWidth: 2,
+    borderColor: color.brand,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  authHeading: { marginTop: 36, marginBottom: 26 },
+  title: { lineHeight: 34, letterSpacing: -0.9 },
   subtitle: { lineHeight: 22 },
+  trustCard: { marginTop: 24, backgroundColor: color.soft, borderWidth: 0 },
 });

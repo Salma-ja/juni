@@ -37,9 +37,14 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 /** The one place every endpoint goes through. Adds the bearer token and clears it on 401. */
 async function call<T>(path: string, body: Record<string, unknown> = {}): Promise<Result<T>> {
   try {
+    const rehearsal = process.env.EXPO_PUBLIC_REHEARSAL_KEY;
     const res = await fetch(`${BASE}/api/${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(rehearsal ? { 'x-rehearsal-key': rehearsal } : {}),
+      },
       body: JSON.stringify(body),
     });
     const json = (await res.json()) as Result<T>;
@@ -55,19 +60,30 @@ async function call<T>(path: string, body: Record<string, unknown> = {}): Promis
 
 // ---------- types ----------
 export type Gender = 'female' | 'male';
+export type Corridor = 'irbid' | 'amman';
 export type Me = {
   profileId: string; fullName: string; gender: Gender; verified: boolean; isDemo: boolean;
   role: 'rider' | 'captain'; captainId: string | null;
+  pointsBalance?: number; defaultPickupId?: string | null;
   captain?: { make_model: string; color: string; plate: string; license_expires_on: string; phone_masked: string } | null;
 };
-export type PickupArea = { id: string; name: string; detail: string; lat: number; lng: number };
-export type Campus = { id: string; code: string; name: string; label: string; lat: number; lng: number };
+export type LocationKind = 'gate' | 'current_gps' | 'custom_home';
+export type PickupArea = {
+  id: string; name: string; detail: string; lat: number; lng: number;
+  name_ar?: string; gate_landmark_en?: string; gate_landmark_ar?: string;
+  corridor?: Corridor; is_custom?: boolean; location_kind?: LocationKind;
+};
+export type Campus = {
+  id: string; code: string; name: string; label: string; lat: number; lng: number;
+  name_ar?: string; short_ar?: string; corridor?: Corridor; corridor_polyline?: [number, number][];
+};
+export type DemandStat = { stat_type: 'pickup_area' | 'class_slot'; entity_key: string; rider_count: number; is_highlighted: boolean };
 
 // ---------- endpoints ----------
-export async function config(): Promise<Result<{ demoLoginEnabled: boolean }>> {
+export async function config(): Promise<Result<{ demoLoginEnabled: boolean; rehearsalMode?: boolean }>> {
   try {
     const res = await fetch(`${BASE}/api/config`);
-    const json = (await res.json()) as { demoLoginEnabled: boolean };
+    const json = (await res.json()) as { demoLoginEnabled: boolean; rehearsalMode?: boolean };
     return { ok: true, data: json };
   } catch {
     return { ok: false, code: 'NETWORK', message: 'Could not reach JUNI. Check your connection.' };
@@ -80,6 +96,45 @@ export const me = () => call<Me>('me');
 export const signOut = () => call<{ signedOut: boolean }>('signout');
 export const pickupAreas = () => call<PickupArea[]>('pickup-areas');
 export const campuses = () => call<Campus[]>('campuses');
+export const setDefaultPickup = (pickupAreaId: string) =>
+  call<{ defaultPickupId: string }>('set-default-pickup', { pickupAreaId });
+export const saveCustomLocation = (b: {
+  lat: number; lng: number; name?: string; detail?: string; kind: 'current_gps' | 'custom_home';
+}) => call<PickupArea>('save-custom-location', b);
+
+// ---------- points & notifications ----------
+export type PointsEntry = {
+  id: string; booking_id: string | null; delta: number; reason: string; label: string; created_at: string;
+};
+export type PointsSummary = { balance: number; target: number; ledger: PointsEntry[] };
+export type AppNotification = {
+  id: string;
+  group_id: string | null;
+  booking_id: string | null;
+  kind: 'trip_accepted' | 'captain_reassigned' | 'trip_started' | 'rider_picked_up' | 'trip_completed' | 'last_seat_points' | 'ride_points';
+  title: string;
+  body: string;
+  meta: {
+    captain_name?: string;
+    vehicle?: string;
+    plate?: string;
+    campus_code?: string;
+    gate_name?: string;
+    picked_up_count?: number;
+    total_riders?: number;
+    picked_name?: string;
+    remaining_minutes?: number;
+    points_earned?: number;
+  };
+  read_at: string | null;
+  created_at: string;
+};
+export type NotificationsResponse = { unreadCount: number; items: AppNotification[] };
+
+export const fetchPoints = () => call<PointsSummary>('points');
+export const fetchNotifications = () => call<NotificationsResponse>('notifications');
+export const markNotificationsRead = (notificationId?: string) =>
+  call<{ ok: boolean }>('notifications/read', notificationId ? { notificationId } : {});
 
 // ---------- plan, departure, search, groups (Phase 4) ----------
 export type Pref = 'girls_only' | 'boys_only' | 'any';
@@ -92,20 +147,37 @@ export type Departure = {
   route_km: number; arrival_at: string; class_start_at: string; minutes_before_class: number; peak_factor: number;
   travel_source: 'model' | 'fallback'; alternative: { group_id: string; departure_at: string } | null;
 };
-export type Member = { first_name: string; verified: boolean; is_you?: boolean };
+export type Member = {
+  first_name: string; verified: boolean; is_you?: boolean;
+  picked_up?: boolean; picked_up_at?: string | null; pickup_name?: string; pickup_at?: string;
+};
+export type LockedSeat = { first_name: string; fare_fils: number; name: string; name_ar: string; km: number };
 export type Candidate = {
   group_id: string; campus_id: string; status: string; pref: Pref; route_version: number;
   departure_at: string; pickup_at: string; arrival_at: string; route_minutes: number;
   travel_source: 'model' | 'fallback'; added_minutes: number; seats_taken: number; capacity: number;
   fare_fils: number; fare_cap_fils: number; group_fare_fils: number; stops: string[]; members: Member[];
 };
-export type GroupDetail = Candidate & { pickup_area_id: string; refund_rule: string; full: boolean; over_cap: boolean };
+export type IsolatedPoolItem = {
+  group_id: string; campus_id: string; pref: 'girls_only' | 'boys_only'; status: string;
+  departure_at: string; arrival_at: string; route_minutes: number; capacity: number;
+  group_fare_fils: number; seats_taken: number; stops: string[]; members: Member[];
+};
+export type IsolatedPoolsResponse = {
+  campus_id: string; rider_gender: Gender; pools: IsolatedPoolItem[];
+};
+export type GroupDetail = Candidate & {
+  pickup_area_id: string; refund_rule: string; full: boolean; over_cap: boolean;
+  locked_seats?: LockedSeat[];
+  your_gate?: { name: string; name_ar: string; km: number } | null;
+};
 export type SearchResult = { request_id: string; candidates: Candidate[]; reason: string | null; filter: Pref };
 
 export const createRequest = (b: { campusId: string; pickupAreaId: string; classStartAt: string; pref?: Pref }) =>
   call<RideRequest>('create-request', b);
 export const recommendDeparture = (requestId: string) => call<Departure>('recommend-departure', { requestId });
 export const searchGroups = (requestId: string, pref?: Pref) => call<SearchResult>('search-groups', { requestId, pref });
+export const fetchIsolatedPools = (requestId: string) => call<IsolatedPoolsResponse>('isolated-pools', { requestId });
 export const createGroup = (requestId: string) => call<Candidate>('create-group', { requestId });
 export const groupDetail = (groupId: string, requestId: string) => call<GroupDetail>('group-detail', { groupId, requestId });
 
@@ -121,12 +193,14 @@ export type Hold = {
 };
 export type PayResult = {
   outcome: 'success' | 'failed'; booking_id: string | null; booking_code: string | null; payment_code: string;
-  status: string;
+  status: string; points_awarded?: number;
 };
 export type BookingStatus = 'seat_booked' | 'awaiting_captain' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
 export type BookingData = {
   id: string; code: string; status: BookingStatus; fare_fils: number; pickup_at: string;
-  pickup_area: { id: string; name: string; detail: string }; campus: { id: string; label: string; code: string };
+  picked_up?: boolean; picked_up_at?: string | null; picked_up_count?: number; total_riders?: number;
+  pickup_area: { id: string; name: string; name_ar?: string; detail: string; gate_landmark_en?: string };
+  campus: { id: string; label: string; code: string; name_ar?: string; short_ar?: string };
   group_id: string; group_status: string; pref: Pref; departure_at: string; arrival_at: string; route_minutes: number;
   captain: { id: string; name: string; phone_masked: string } | null; captain_confirmed: boolean;
   vehicle: { make_model: string; color: string; plate: string } | null;
@@ -134,16 +208,32 @@ export type BookingData = {
   refund: { amount_fils: number; reason: string; hours_before_pickup: number } | null;
   payment_code: string | null; seats_taken: number; capacity: number;
 };
+export type BookingStop = {
+  seq: number; pickup_area_id?: string; name: string; name_ar?: string; eta_at: string;
+  picked_count?: number; rider_count?: number;
+};
 export type BookingDetail = BookingData & {
   app_now: string; hours_to_pickup: number; route_km: number; travel_source: string; group_fare_fils: number;
-  fare_cap_fils: number; refund_rule: string; stops: { seq: number; name: string; eta_at: string }[]; members: Member[];
+  fare_cap_fils: number; refund_rule: string; stops: BookingStop[]; members: Member[];
 };
 
 export const startCheckout = (b: { groupId: string; pickupAreaId: string; routeVersion: number; idempotencyKey: string }) =>
   call<Checkout>('start-checkout', b);
+export type Pending = {
+  app_now: string;
+  hold: {
+    hold_id: string; group_id: string; pickup_area_id: string; pickup_name: string; campus_id: string; fare_fils: number;
+    expires_at: string; pickup_at: string; arrival_at: string; request_id: string | null;
+  } | null;
+  plan: { request_id: string; campus_id: string; pickup_area_id: string; pickup_name: string; arrival_at: string } | null;
+};
+export const pending = () => call<Pending>('pending');
 export const hold = (holdId: string) => call<Hold>('hold', { holdId });
-export const pay = (holdId: string, outcome: 'success' | 'failed', idempotencyKey: string) =>
-  call<PayResult>('pay', { holdId, outcome, idempotencyKey });
+export const pay = (holdId: string, outcome: 'success' | 'failed', idempotencyKey: string, paymentMethod: 'cash' | 'jeeny_wallet' | 'card' = 'cash') =>
+  call<PayResult>('pay', { holdId, outcome, idempotencyKey, paymentMethod });
+export const demandStats = () => call<DemandStat[]>('demand-stats');
+export const dispatchAudit = (groupId: string) => call<{ captain_id: string; outcome: string; detail: string }[]>('dispatch-audit', { groupId });
+export const resetRehearsal = () => call<{ ok: boolean; teaching_day?: string; seats_taken?: number }>('demo/reset-rehearsal');
 export const booking = (bookingId: string) => call<BookingDetail>('booking', { bookingId });
 
 // ---------- rides, cancellation, SOS (Phase 6) ----------
@@ -193,8 +283,10 @@ export type Earnings = {
 export const claimCaptain = (captainId: string) => call<{ token: string; profile: Me }>('demo/claim', { role: 'captain', captainId });
 export const captainTrips = () => call<CaptainTrip[]>('captain/trips');
 export const captainConfirm = (groupId: string) => call<unknown>('captain/confirm', { groupId });
-export const captainDecline = (groupId: string) => call<{ reassigned_to: string | null }>('captain/decline', { groupId });
+export const captainDecline = (groupId: string) =>
+  call<{ group_id: string; reassigned_to: string | null; reassigned_name?: string | null }>('captain/decline', { groupId });
 export const captainStart = (groupId: string) => call<unknown>('captain/start', { groupId });
-export const captainPickup = (groupId: string, bookingId: string) => call<unknown>('captain/pickup', { groupId, bookingId });
+export const captainPickup = (groupId: string, bookingId: string) =>
+  call<{ booking_id: string; picked_up: boolean; picked_up_count?: number; total_riders?: number }>('captain/pickup', { groupId, bookingId });
 export const captainComplete = (groupId: string) => call<unknown>('captain/complete', { groupId });
 export const captainEarnings = () => call<Earnings>('captain/earnings');

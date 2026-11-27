@@ -24,7 +24,7 @@ after(async () => {
 const post = (path, body = {}, t) =>
   fetch(`${base}/api/${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}), ...(process.env.JUNI_REHEARSAL_PIN ? { 'x-rehearsal-key': process.env.JUNI_REHEARSAL_PIN } : {}) },
     body: JSON.stringify(body),
   }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
 const claim = async (gender = 'female') => (await post('demo/claim', { gender, fullName: 'zz-test Demo' })).data.token;
