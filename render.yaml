@@ -1,0 +1,26 @@
+# One-click deploy on Render's free tier: web service + free Postgres.
+services:
+  - type: web
+    name: juni
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build:web
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: juni-db
+          property: connectionString
+      - key: JUNI_DEMO_LOGIN_ENABLED
+        value: "true"
+      - key: JUNI_REHEARSAL_MODE
+        value: "true"
+      - key: EXPO_PUBLIC_SHOW_DEMO_BAR
+        value: "true"
+databases:
+  - name: juni-db
+    plan: free
+    databaseName: juni
