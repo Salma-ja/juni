@@ -5,6 +5,6 @@ export const unstable_settings = { anchor: 'rides' };
 
 export default function RidesStack() {
   return <Stack initialRouteName="rides" screenOptions={{
-    headerShown: false, animation: 'none', contentStyle: { backgroundColor: color.white },
+    headerShown: false, animation: 'fade_from_bottom', contentStyle: { backgroundColor: color.white },
   }} />;
 }

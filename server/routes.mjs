@@ -70,6 +70,16 @@ export function buildRouter() {
   // ---- Phase 3: demo sessions (§6) ----
   endpoint(r, 'demo/claim', async ({ client, body }) => {
     if (process.env.JUNI_DEMO_LOGIN_ENABLED !== 'true') throw new ApiError('DEMO_DISABLED', 'Demo login is disabled.', 403);
+    if (body.role === 'captain') {
+      const cap = (await client.query('select id, full_name from captains where id = $1 and licensed and active', [body.captainId])).rows[0];
+      if (!cap) throw new ApiError('INVALID_INPUT', 'captainId is invalid');
+      const p = (await client.query(
+        `insert into profiles (full_name, gender, verified, is_demo, captain_id) values ($1, 'male', true, true, $2)
+         returning id, full_name, gender, verified, is_demo, captain_id`, [cap.full_name, cap.id])).rows[0];
+      await client.query('insert into demo_settings (profile_id) values ($1)', [p.id]);
+      const { token } = (await client.query('insert into sessions (profile_id) values ($1) returning token', [p.id])).rows[0];
+      return { token, profile: meJson(p) };
+    }
     const { gender } = body;
     if (gender !== 'female' && gender !== 'male') throw new ApiError('INVALID_INPUT', 'gender must be female or male');
     const fullName = typeof body.fullName === 'string' && body.fullName.trim() ? body.fullName.trim().slice(0, 40) : (gender === 'female' ? 'Salma' : 'Omar');
@@ -81,7 +91,16 @@ export function buildRouter() {
     return { token, profile: meJson(p) };
   }, { public: true });
 
-  endpoint(r, 'me', async ({ profile }) => meJson(profile));
+  endpoint(r, 'me', async ({ client, profile }) => {
+    const me = meJson(profile);
+    if (profile.captain_id) {
+      const v = (await client.query(
+        `select v.make_model, v.color, v.plate, c.license_expires_on, c.phone_masked
+           from captains c join vehicles v on v.captain_id = c.id where c.id = $1`, [profile.captain_id])).rows[0];
+      me.captain = v ?? null;
+    }
+    return me;
+  });
 
   endpoint(r, 'signout', async ({ client, req }) => {
     const token = req.get('authorization').replace(/^Bearer\s+/i, '').toLowerCase();
@@ -212,7 +231,29 @@ export function buildRouter() {
     return { reset: true };
   });
 
+  // ---- Captain (driver) mode ----
+  const cap = (name, fn) => endpoint(r, `captain/${name}`, (ctx) => {
+    if (!ctx.profile.captain_id) throw new ApiError('CAPTAIN_ONLY', 'Captain account required.', 403);
+    return fn({ ...ctx, captainId: ctx.profile.captain_id });
+  });
+  cap('trips', ({ client, captainId, now }) =>
+    callCore(client, 'select core.captain_trips($1,$2::timestamptz) as r', [captainId, now]));
+  cap('confirm', ({ client, captainId, body, now }) =>
+    callCore(client, 'select core.captain_confirm($1,$2::uuid,$3::timestamptz) as r', [captainId, uuid(body.groupId, 'groupId'), now]));
+  cap('decline', ({ client, captainId, body, now }) =>
+    callCore(client, 'select core.captain_decline($1,$2::uuid,$3::timestamptz) as r', [captainId, uuid(body.groupId, 'groupId'), now]));
+  cap('start', ({ client, captainId, body, now }) =>
+    callCore(client, 'select core.captain_start($1,$2::uuid,$3::timestamptz) as r', [captainId, uuid(body.groupId, 'groupId'), now]));
+  cap('pickup', ({ client, captainId, body, now }) =>
+    callCore(client, 'select core.captain_pickup($1,$2::uuid,$3::uuid,$4::timestamptz) as r',
+      [captainId, uuid(body.groupId, 'groupId'), uuid(body.bookingId, 'bookingId'), now]));
+  cap('complete', ({ client, captainId, body, now }) =>
+    callCore(client, 'select core.captain_complete($1,$2::uuid,$3::timestamptz) as r', [captainId, uuid(body.groupId, 'groupId'), now]));
+  cap('earnings', ({ client, captainId }) =>
+    callCore(client, 'select core.captain_earnings($1) as r', [captainId]));
+
   return r;
 }
 
-const meJson = (p) => ({ profileId: p.id, fullName: p.full_name, gender: p.gender, verified: p.verified, isDemo: p.is_demo });
+const meJson = (p) => ({ profileId: p.id, fullName: p.full_name, gender: p.gender, verified: p.verified, isDemo: p.is_demo,
+  role: p.captain_id ? 'captain' : 'rider', captainId: p.captain_id ?? null });

@@ -5,6 +5,6 @@ export const unstable_settings = { anchor: 'home' };
 
 export default function HomeStack() {
   return <Stack initialRouteName="home" screenOptions={{
-    headerShown: false, animation: 'none', contentStyle: { backgroundColor: color.white },
+    headerShown: false, animation: 'fade_from_bottom', contentStyle: { backgroundColor: color.white },
   }} />;
 }

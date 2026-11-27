@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, Check, ChevronRight, Route } from 'lucide-react-
 import type { LucideIcon } from 'lucide-react-native';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Animated, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text,
+  Animated, Easing, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text,
   TextInput, useWindowDimensions, View,
   type StyleProp, type TextInputProps, type TextProps, type TextStyle, type ViewStyle,
 } from 'react-native';
@@ -43,7 +43,7 @@ export function Page({ children, style, mode = 'page' }: {
   const { bottom } = useSafeAreaInsets();
   const clock = useClockOffset();
   useEffect(() => {
-    const animation = Animated.timing(fade, { toValue: 1, duration: 320, useNativeDriver: Platform.OS !== 'web' });
+    const animation = Animated.timing(fade, { toValue: 1, duration: 340, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web' });
     animation.start();
     return () => animation.stop();
   }, [fade]);
@@ -61,7 +61,7 @@ export function Page({ children, style, mode = 'page' }: {
           mode === 'auth' && styles.auth,
           mode === 'edge' && { padding: 0, minHeight: height },
           style,
-          { opacity: fade, transform: [{ translateY: fade.interpolate({ inputRange: [0, 1], outputRange: [5, 0] }) }] },
+          { opacity: fade, transform: [{ translateY: fade.interpolate({ inputRange: [0, 1], outputRange: [34, 0] }) }, { scale: fade.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] },
         ]}>
           {children}
         </Animated.View>

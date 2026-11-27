@@ -55,7 +55,11 @@ async function call<T>(path: string, body: Record<string, unknown> = {}): Promis
 
 // ---------- types ----------
 export type Gender = 'female' | 'male';
-export type Me = { profileId: string; fullName: string; gender: Gender; verified: boolean; isDemo: boolean };
+export type Me = {
+  profileId: string; fullName: string; gender: Gender; verified: boolean; isDemo: boolean;
+  role: 'rider' | 'captain'; captainId: string | null;
+  captain?: { make_model: string; color: string; plate: string; license_expires_on: string; phone_masked: string } | null;
+};
 export type PickupArea = { id: string; name: string; detail: string; lat: number; lng: number };
 export type Campus = { id: string; code: string; name: string; label: string; lat: number; lng: number };
 
@@ -171,3 +175,26 @@ export const demoCompleteTrip = (bookingId: string) => call<unknown>('demo/compl
 export const demoLastSeatGroups = () => call<LastSeatGroup[]>('demo/last-seat-groups');
 export const demoSeedCheckout = (groupId: string) => call<Checkout & { seed_rider: string }>('demo/seed-checkout', { groupId });
 export const demoReset = () => call<{ reset: boolean }>('demo/reset');
+
+// ---------- captain (driver) mode ----------
+export type TripRider = { booking_id: string; first_name: string; picked_up: boolean };
+export type TripStop = { seq: number; name: string; detail: string; eta_at: string; riders: TripRider[] };
+export type CaptainTrip = {
+  group_id: string; status: 'full' | 'awaiting_captain' | 'confirmed' | 'in_progress' | 'completed'; pref: Pref;
+  campus: { id: string; label: string; code: string }; departure_at: string; arrival_at: string; route_minutes: number;
+  route_km: number; seats_taken: number; capacity: number; confirmed: boolean;
+  vehicle: { make_model: string; color: string; plate: string } | null; collected_fils: number; payout_fils: number;
+  stops: TripStop[];
+};
+export type Earnings = {
+  completed_trips: number; total_payout_fils: number;
+  trips: { group_id: string; departure_at: string; campus_code: string; riders: number; payout_fils: number }[];
+};
+export const claimCaptain = (captainId: string) => call<{ token: string; profile: Me }>('demo/claim', { role: 'captain', captainId });
+export const captainTrips = () => call<CaptainTrip[]>('captain/trips');
+export const captainConfirm = (groupId: string) => call<unknown>('captain/confirm', { groupId });
+export const captainDecline = (groupId: string) => call<{ reassigned_to: string | null }>('captain/decline', { groupId });
+export const captainStart = (groupId: string) => call<unknown>('captain/start', { groupId });
+export const captainPickup = (groupId: string, bookingId: string) => call<unknown>('captain/pickup', { groupId, bookingId });
+export const captainComplete = (groupId: string) => call<unknown>('captain/complete', { groupId });
+export const captainEarnings = () => call<Earnings>('captain/earnings');

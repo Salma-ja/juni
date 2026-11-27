@@ -13,6 +13,7 @@ export default function TabLayout() {
   return (
     <Tabs initialRouteName="(home)" backBehavior="initialRoute" screenOptions={{
       headerShown: false,
+      animation: 'fade',
       tabBarActiveTintColor: color.brand,
       tabBarInactiveTintColor: '#82908F',
       tabBarLabelPosition: 'below-icon',

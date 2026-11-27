@@ -6,14 +6,14 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomSheet, Button, center, Copy, Eyebrow, fill, Logo, Page, Pile, Row, TextLink } from '@/components/ui';
 import { color } from '@/theme';
-import { claimPersona, config, type Gender } from '@/data/api';
+import { claimCaptain, claimPersona, config, type Gender } from '@/data/api';
 import { useAuth } from '@/features/authSession';
 
 export function Splash() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { ready, canEnter } = useAuth();
-  const destination = canEnter ? '/home' : '/login';
+  const { ready, canEnter, profile } = useAuth();
+  const destination = canEnter ? (profile?.role === 'captain' ? '/driver' : '/home') : '/login';
   useEffect(() => {
     if (!ready) return;
     const timer = setTimeout(() => router.replace(destination), canEnter ? 0 : 3200);
@@ -72,13 +72,20 @@ const personas: { gender: Gender; name: string; label: string }[] = [
   { gender: 'male', name: 'Omar', label: 'Omar · Boys-only rides' },
 ];
 
+const captains = [
+  { id: 'cap-1', label: 'Captain Omar Khalil · Toyota Prius' },
+  { id: 'cap-2', label: 'Captain Yazan Haddad · Hyundai Elantra' },
+  { id: 'cap-3', label: 'Captain Ahmad Rawashdeh · Kia Niro' },
+  { id: 'cap-4', label: 'Captain Faris Obeidat · Toyota Corolla' },
+] as const;
+
 /** "Continue as demo student": opens a sheet with two personas, claims a server session, enters the app. */
 export function DemoAccess() {
   const router = useRouter();
   const { signInWithToken } = useAuth();
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<Gender | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -86,6 +93,22 @@ export function DemoAccess() {
     config().then((res) => { if (live && res.ok) setEnabled(res.data.demoLoginEnabled); });
     return () => { live = false; };
   }, []);
+
+  async function chooseCaptain(captain: (typeof captains)[number]) {
+    if (busy) return;
+    setBusy(captain.id);
+    setError('');
+    const res = await claimCaptain(captain.id);
+    if (!res.ok) {
+      setBusy(null);
+      setError('Something went wrong. Try again.');
+      return;
+    }
+    await signInWithToken(res.data.token, res.data.profile);
+    setBusy(null);
+    setOpen(false);
+    router.replace('/driver');
+  }
 
   async function choose(persona: (typeof personas)[number]) {
     if (busy) return;
@@ -115,6 +138,12 @@ export function DemoAccess() {
           {personas.map((persona) => (
             <Button key={persona.gender} tone="secondary" disabled={busy !== null} onPress={() => choose(persona)}>
               {busy === persona.gender ? 'Starting…' : persona.label}
+            </Button>
+          ))}
+          <Copy size={12} weight={800} style={{ marginTop: 6 }}>Or try the driver app</Copy>
+          {captains.map((captain) => (
+            <Button key={captain.id} tone="secondary" disabled={busy !== null} onPress={() => chooseCaptain(captain)}>
+              {busy === captain.id ? 'Starting…' : captain.label}
             </Button>
           ))}
           {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}

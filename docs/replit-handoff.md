@@ -569,3 +569,6 @@ Real fare constants, payout floor and dispatch buffer. Treatment of staff-shared
 | N12 | **tsconfig** excludes `dist`, `server`, `scripts`, `tests` and `db`: `tsc` ran out of stack on the exported web bundle once `dist/` existed. |
 | N13 | **TOO_SOON in checkout** is unreachable for existing groups (the deadline in §5.6 fires at departure - 2 h, earlier than the 60-minute check). It is enforced in `create_request` and `create_group`, where it can fire. |
 
+
+| N14 | **Captain (driver) mode** (added after the original scope, migration `0009`). Demo captains log in from the login sheet ("Or try the driver app", cap-1 to cap-4) and see the trips the rules assigned to them: accept or decline (decline hands the trip to the next eligible captain), start, mark each rider picked up, complete, earnings (80% of fares collected). Endpoints `POST /api/captain/*`, functions `core.captain_*`. Riders see the status change through the normal booking screens. |
+| N15 | **Transitions.** Every screen slides up and fades in (Page animation), plus stack and tab `fade` / `fade_from_bottom` animations. |

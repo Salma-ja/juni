@@ -10,18 +10,22 @@ import { color } from '@/theme';
 import { AuthProvider, useAuth } from '@/features/authSession';
 
 function AppStack() {
-  const { canEnter, ready } = useAuth();
+  const { canEnter, ready, profile } = useAuth();
+  const captain = canEnter && profile?.role === 'captain';
   if (!ready) return null;
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'none', contentStyle: styles.screen }}>
+    <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: styles.screen }}>
       <Stack.Screen name="index" />
       <Stack.Protected guard={!canEnter}>
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
         <Stack.Screen name="verification" />
       </Stack.Protected>
-      <Stack.Protected guard={canEnter}>
+      <Stack.Protected guard={canEnter && !captain}>
         <Stack.Screen name="(tabs)" />
+      </Stack.Protected>
+      <Stack.Protected guard={captain}>
+        <Stack.Screen name="(captain)" />
       </Stack.Protected>
     </Stack>
   );

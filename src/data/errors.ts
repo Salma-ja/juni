@@ -17,6 +17,12 @@ const copy: Record<string, string> = {
   PREF_NONE: 'No groups match that preference at this time.',
   ROUTE_INFEASIBLE: 'No group can add your pickup without delaying others.',
   BOOKING_OVERLAP: 'You already have a ride around that time.',
+  NOT_YOUR_TRIP: 'This trip is no longer assigned to you.',
+  PICKUPS_PENDING: 'Mark every rider as picked up before completing the trip.',
+  GROUP_NOT_CONFIRMED: 'Accept the trip before starting it.',
+  TRIP_NOT_STARTED: 'Start the trip first.',
+  GROUP_NOT_AWAITING: 'This trip can no longer be accepted or declined.',
+  CAPTAIN_ONLY: 'Captain account required.',
   DEMO_ONLY: 'Demo controls are only available in demo mode.',
 };
 
