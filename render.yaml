@@ -24,3 +24,4 @@ databases:
   - name: juni-db
     plan: free
     databaseName: juni
+    ipAllowList: []
