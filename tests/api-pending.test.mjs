@@ -77,3 +77,11 @@ test('pending requires a session', async () => {
   const res = await post('pending', {});
   assert.equal(res.status, 401);
 });
+
+test('dispatch-audit is limited to riders booked in the group', async () => {
+  const stranger = await post('demo/claim', { gender: 'female', fullName: 'zz-test Stranger' });
+  const groupId = (await c.query(`select id from groups order by created_at desc limit 1`)).rows[0].id;
+  const res = await post('dispatch-audit', { groupId }, stranger.data.token);
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.data, [], 'a rider with no booking in the group sees nothing');
+});

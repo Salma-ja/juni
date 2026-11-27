@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
@@ -139,10 +140,15 @@ export function buildRouter() {
                           order by case id when 'just' then 1 when 'yarmouk' then 2 when 'inu' then 3 when 'uj' then 4 when 'aau' then 5 else 6 end, label`)).rows);
   endpoint(r, 'demand-stats', async ({ client }) =>
     (await client.query('select stat_type, entity_key, rider_count, is_highlighted from core.corridor_demand_stats')).rows);
-  endpoint(r, 'dispatch-audit', async ({ client, body }) =>
+  // Dispatch log for one group: only for riders booked in it and the group's own captain.
+  endpoint(r, 'dispatch-audit', async ({ client, profile, body }) =>
     (await client.query(
-      `select captain_id, outcome, detail from captain_dispatch_audit where group_id = $1 order by created_at`,
-      [uuid(body.groupId, 'groupId')],
+      `select a.captain_id, a.outcome, a.detail from captain_dispatch_audit a
+        where a.group_id = $1
+          and (exists (select 1 from bookings b where b.group_id = a.group_id and b.rider_id = $2 and b.status <> 'cancelled')
+               or exists (select 1 from groups g where g.id = a.group_id and g.captain_id = $3))
+        order by a.created_at`,
+      [uuid(body.groupId, 'groupId'), profile.id, profile.captain_id ?? null],
     )).rows);
 
   endpoint(r, 'set-default-pickup', async ({ client, profile, body }) => {
@@ -190,7 +196,8 @@ export function buildRouter() {
     )).rows[0];
     const areaId = inUse ? `${baseId}-${Math.random().toString(36).slice(2, 6)}` : baseId;
 
-    const saved = (await client.query(
+    // Only ever update a pin this rider owns; if the id is taken by someone else, save under a fresh random id.
+    const savePin = async (id) => (await client.query(
       `insert into pickup_areas (
          id, name, name_ar, detail, gate_landmark_en, gate_landmark_ar,
          lat, lng, corridor, is_custom, owner_profile_id, location_kind
@@ -205,9 +212,12 @@ export function buildRouter() {
          lng = excluded.lng,
          corridor = excluded.corridor,
          location_kind = excluded.location_kind
+       where pickup_areas.owner_profile_id = excluded.owner_profile_id
        returning id, name, name_ar, detail, gate_landmark_en, gate_landmark_ar, lat, lng, corridor, is_custom, location_kind`,
-      [areaId, rawName, nameAr, rawDetail, rawDetail, nearest?.name_ar ? `بالقرب من ${nearest.name_ar}` : nameAr, lat, lng, corridor, profile.id, kind],
+      [id, rawName, nameAr, rawDetail, rawDetail, nearest?.name_ar ? `بالقرب من ${nearest.name_ar}` : nameAr, lat, lng, corridor, profile.id, kind],
     )).rows[0];
+    const saved = (await savePin(areaId)) ?? (await savePin(`${baseId}-${randomUUID().slice(0, 8)}`));
+    if (!saved) throw new ApiError('INTERNAL', 'Could not save the location.', 500);
 
     await client.query('update profiles set default_pickup_id = $2 where id = $1', [profile.id, saved.id]);
     return saved;
