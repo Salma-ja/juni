@@ -123,6 +123,26 @@ export function buildRouter() {
       [profile.id, uuid(body.groupId, 'groupId'), s(body.pickupAreaId, 'pickupAreaId'),
        Number.isInteger(body.routeVersion) ? body.routeVersion : null, uuid(body.idempotencyKey, 'idempotencyKey'), now]));
 
+  // ---- Phase 5: payment and booking ----
+  endpoint(r, 'pay', ({ client, profile, body, now }) => {
+    if (body.outcome !== 'success' && body.outcome !== 'failed') throw new ApiError('INVALID_INPUT', 'outcome is invalid');
+    return callCore(client, 'select core.pay($1::uuid,$2::uuid,$3,$4::uuid,$5::timestamptz) as r',
+      [profile.id, uuid(body.holdId, 'holdId'), body.outcome, uuid(body.idempotencyKey, 'idempotencyKey'), now]);
+  });
+  endpoint(r, 'booking', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.booking_detail($1::uuid,$2::uuid,$3::timestamptz) as r',
+      [profile.id, uuid(body.bookingId, 'bookingId'), now]));
+  // Plain read of the caller's own hold, so the payment screen survives a reload (not a rule: no computation).
+  endpoint(r, 'hold', async ({ client, profile, body, now }) => {
+    const row = (await client.query(
+      `select h.id as hold_id, h.group_id, h.pickup_area_id, h.quoted_fare_fils as fare_fils, h.expires_at, h.released_at,
+              h.release_reason, g.departure_at, g.campus_id
+         from seat_holds h join groups g on g.id = h.group_id
+        where h.id = $1 and h.rider_id = $2`, [uuid(body.holdId, 'holdId'), profile.id])).rows[0];
+    if (!row) throw new ApiError('HOLD_NOT_FOUND', 'Hold not found.');
+    return { ...row, app_now: now, active: row.released_at === null && new Date(row.expires_at) > new Date(now) };
+  });
+
   return r;
 }
 

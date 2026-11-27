@@ -104,3 +104,40 @@ export const recommendDeparture = (requestId: string) => call<Departure>('recomm
 export const searchGroups = (requestId: string, pref?: Pref) => call<SearchResult>('search-groups', { requestId, pref });
 export const createGroup = (requestId: string) => call<Candidate>('create-group', { requestId });
 export const groupDetail = (groupId: string, requestId: string) => call<GroupDetail>('group-detail', { groupId, requestId });
+
+// ---------- checkout, payment, status (Phase 5) ----------
+export type Checkout = {
+  hold_id: string; group_id: string; pickup_area_id: string; expires_at: string; app_now: string; fare_fils: number;
+  pickup_at: string; departure_at: string; campus_id: string; route_version: number; inside_12h: boolean;
+};
+export type Hold = {
+  hold_id: string; group_id: string; pickup_area_id: string; fare_fils: number; expires_at: string;
+  released_at: string | null; release_reason: string | null; departure_at: string; campus_id: string;
+  app_now: string; active: boolean;
+};
+export type PayResult = {
+  outcome: 'success' | 'failed'; booking_id: string | null; booking_code: string | null; payment_code: string;
+  status: string;
+};
+export type BookingStatus = 'seat_booked' | 'awaiting_captain' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+export type BookingData = {
+  id: string; code: string; status: BookingStatus; fare_fils: number; pickup_at: string;
+  pickup_area: { id: string; name: string; detail: string }; campus: { id: string; label: string; code: string };
+  group_id: string; group_status: string; pref: Pref; departure_at: string; arrival_at: string; route_minutes: number;
+  captain: { id: string; name: string; phone_masked: string } | null; captain_confirmed: boolean;
+  vehicle: { make_model: string; color: string; plate: string } | null;
+  cancelled_by: string | null; cancelled_at: string | null;
+  refund: { amount_fils: number; reason: string; hours_before_pickup: number } | null;
+  payment_code: string | null; seats_taken: number; capacity: number;
+};
+export type BookingDetail = BookingData & {
+  app_now: string; hours_to_pickup: number; route_km: number; travel_source: string; group_fare_fils: number;
+  fare_cap_fils: number; refund_rule: string; stops: { seq: number; name: string; eta_at: string }[]; members: Member[];
+};
+
+export const startCheckout = (b: { groupId: string; pickupAreaId: string; routeVersion: number; idempotencyKey: string }) =>
+  call<Checkout>('start-checkout', b);
+export const hold = (holdId: string) => call<Hold>('hold', { holdId });
+export const pay = (holdId: string, outcome: 'success' | 'failed', idempotencyKey: string) =>
+  call<PayResult>('pay', { holdId, outcome, idempotencyKey });
+export const booking = (bookingId: string) => call<BookingDetail>('booking', { bookingId });

@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/index.mjs';
 import { pool } from '../server/db.mjs';
-import { connect } from './helpers.mjs';
+import { connect, cleanupFixtures } from './helpers.mjs';
 
 let server, base;
 before(async () => {
@@ -12,10 +12,13 @@ before(async () => {
 });
 after(async () => {
   await new Promise((r) => server.close(r));
-  const c = await connect();
-  await c.query(`delete from profiles where is_demo and full_name like 'zz-test%'`);
-  await c.end();
-  await pool.end();
+  try {
+    const c = await connect();
+    await cleanupFixtures(c);
+    await c.end();
+  } finally {
+    await pool.end();
+  }
 });
 
 const post = (path, body = {}, token) =>

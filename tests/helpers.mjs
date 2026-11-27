@@ -96,6 +96,13 @@ export async function cleanupFixtures(c) {
   await c.query(`delete from groups where id in ${gids}`);
   await c.query(`delete from ride_requests where rider_id in ${ids}`);
   await c.query(`delete from idempotency_results where created_at < now() and key not in (select idempotency_key from payments union select idempotency_key from seat_holds)`);
+  // bookings/holds placed by fixture riders in other groups (e.g. seeded ones) and their payments/refunds
+  const mine = `(select id from bookings where rider_id in ${ids})`;
+  await c.query(`delete from refunds where booking_id in ${mine}`);
+  await c.query(`delete from incidents where booking_id in ${mine}`);
+  await c.query(`delete from payments where booking_id in ${mine} or hold_id in (select id from seat_holds where rider_id in ${ids})`);
+  await c.query(`delete from bookings where rider_id in ${ids}`);
+  await c.query(`delete from seat_holds where rider_id in ${ids}`);
   await c.query(`delete from profiles where full_name like 'zz-test%'`);
 }
 
