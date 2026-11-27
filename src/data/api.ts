@@ -76,3 +76,31 @@ export const me = () => call<Me>('me');
 export const signOut = () => call<{ signedOut: boolean }>('signout');
 export const pickupAreas = () => call<PickupArea[]>('pickup-areas');
 export const campuses = () => call<Campus[]>('campuses');
+
+// ---------- plan, departure, search, groups (Phase 4) ----------
+export type Pref = 'girls_only' | 'boys_only' | 'any';
+export type RideRequest = {
+  request_id: string; campus_id: string; pickup_area_id: string; class_start_at: string;
+  arrival_target_at: string; pref: Pref;
+};
+export type Departure = {
+  request_id: string; campus_id: string; pickup_area_id: string; departure_at: string; route_minutes: number;
+  route_km: number; arrival_at: string; class_start_at: string; minutes_before_class: number; peak_factor: number;
+  travel_source: 'model' | 'fallback'; alternative: { group_id: string; departure_at: string } | null;
+};
+export type Member = { first_name: string; verified: boolean; is_you?: boolean };
+export type Candidate = {
+  group_id: string; campus_id: string; status: string; pref: Pref; route_version: number;
+  departure_at: string; pickup_at: string; arrival_at: string; route_minutes: number;
+  travel_source: 'model' | 'fallback'; added_minutes: number; seats_taken: number; capacity: number;
+  fare_fils: number; fare_cap_fils: number; group_fare_fils: number; stops: string[]; members: Member[];
+};
+export type GroupDetail = Candidate & { pickup_area_id: string; refund_rule: string; full: boolean; over_cap: boolean };
+export type SearchResult = { request_id: string; candidates: Candidate[]; reason: string | null; filter: Pref };
+
+export const createRequest = (b: { campusId: string; pickupAreaId: string; classStartAt: string; pref?: Pref }) =>
+  call<RideRequest>('create-request', b);
+export const recommendDeparture = (requestId: string) => call<Departure>('recommend-departure', { requestId });
+export const searchGroups = (requestId: string, pref?: Pref) => call<SearchResult>('search-groups', { requestId, pref });
+export const createGroup = (requestId: string) => call<Candidate>('create-group', { requestId });
+export const groupDetail = (groupId: string, requestId: string) => call<GroupDetail>('group-detail', { groupId, requestId });

@@ -26,7 +26,7 @@ export function BookingSummary() {
       <Header title="Review booking" onBack={() => router.dismissTo('/group')} />
       <View style={styles.summaryRoute}>
         <Copy size={9} weight={700} tint="#F2A3CC">{schedule.departureDate}</Copy>
-        <RouteTitle light destination={schedule.campus.code} />
+        <RouteTitle light pickup="Pickup" destination={schedule.campus.code} />
         <Copy size={10} tint="#CFC5DA">{`${schedule.departure} · Est. arrival ${schedule.arrival}`}</Copy>
       </View>
       <Card style={styles.ruleChecks}>

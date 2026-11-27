@@ -91,6 +91,32 @@ export function buildRouter() {
   endpoint(r, 'campuses', async ({ client }) =>
     (await client.query('select id, code, name, label, lat, lng from campuses order by label')).rows);
 
+  // ---- Phase 4: plan, departure, search, groups ----
+  const PREFS = ['girls_only', 'boys_only', 'any'];
+  const pref = (v) => {
+    if (v == null) return null;
+    if (!PREFS.includes(v)) throw new ApiError('INVALID_INPUT', 'pref is invalid');
+    return v;
+  };
+  endpoint(r, 'create-request', ({ client, profile, body, now }) => {
+    const start = new Date(body.classStartAt);
+    if (Number.isNaN(start.getTime())) throw new ApiError('INVALID_INPUT', 'classStartAt is invalid');
+    return callCore(client, 'select core.create_request($1::uuid,$2,$3,$4::timestamptz,$5::group_pref,$6::timestamptz) as r',
+      [profile.id, s(body.campusId, 'campusId'), s(body.pickupAreaId, 'pickupAreaId'), start.toISOString(), pref(body.pref), now]);
+  });
+  endpoint(r, 'recommend-departure', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.recommend_departure($1::uuid,$2::uuid,$3::timestamptz) as r',
+      [profile.id, uuid(body.requestId, 'requestId'), now]));
+  endpoint(r, 'search-groups', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.search_groups($1::uuid,$2::uuid,$3::group_pref,$4::timestamptz) as r',
+      [profile.id, uuid(body.requestId, 'requestId'), pref(body.pref), now]));
+  endpoint(r, 'create-group', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.create_group($1::uuid,$2::uuid,$3::timestamptz) as r',
+      [profile.id, uuid(body.requestId, 'requestId'), now]));
+  endpoint(r, 'group-detail', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.group_detail($1::uuid,$2::uuid,$3::uuid,$4::timestamptz) as r',
+      [profile.id, uuid(body.groupId, 'groupId'), uuid(body.requestId, 'requestId'), now]));
+
   // start-checkout is registered here because X7 (Phase 3) asserts that it rejects missing sessions.
   endpoint(r, 'start-checkout', ({ client, profile, body, now }) =>
     callCore(client, 'select core.start_checkout($1::uuid,$2::uuid,$3,$4::int,$5::uuid,$6::timestamptz) as r',

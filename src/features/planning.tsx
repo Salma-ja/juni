@@ -1,56 +1,92 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowRight, BadgeCheck, CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Info, LockKeyhole,
-  MapPin, Navigation, Route, ShieldCheck, Sparkles, Star, UserPlus, Users, CircleUserRound, X, Zap,
+  MapPin, Navigation, Route, ShieldCheck, Sparkles, Star, TrendingUp, UserPlus, Users, CircleUserRound, X,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import {
   Avatar, Badge, BottomSheet, Button, Card, center, Copy, Eyebrow, Field, fill, Header, IconButton,
   InfoRow, Notice, Page, Pile, RouteCard, Row, SectionHeading, spread, Tile,
 } from '@/components/ui';
 import { color, shadow } from '@/theme';
-import { campuses, getSchedule, parseSchedule, useRideSchedule, type Schedule } from '@/features/rideSchedule';
+import { parseSchedule, tomorrow } from '@/features/rideSchedule';
+import {
+  createGroup, createRequest, groupDetail, recommendDeparture, searchGroups,
+  type Candidate, type Departure, type GroupDetail as GroupDetailData, type Pref, type SearchResult,
+} from '@/data/api';
+import { errorCopy } from '@/data/errors';
+import { ammanInstant, formatDate, formatFils, formatTime } from '@/data/format';
+import { useRefData } from '@/data/refdata';
+import { useAuth } from '@/features/authSession';
+
+type PlanParams = { campusId?: string; pickupAreaId?: string; date?: string; classTime?: string };
 
 export function PlanRide() {
   const router = useRouter();
-  const initialSchedule = useRideSchedule();
-  const [schedule, setSchedule] = useState(initialSchedule.params);
-  const [editing, setEditing] = useState<keyof Schedule | null>(null);
+  const params = useLocalSearchParams<PlanParams>();
+  const ref = useRefData();
+  const [campusId, setCampusId] = useState(params.campusId ?? 'just');
+  const [pickupId, setPickupId] = useState<string | null>(params.pickupAreaId ?? null);
+  const [date, setDate] = useState(params.date ?? tomorrow());
+  const [classTime, setClassTime] = useState(params.classTime ?? '08:00');
+  const [editing, setEditing] = useState<'date' | 'classTime' | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
-  const [selectingCampus, setSelectingCampus] = useState(false);
-  const display = getSchedule(schedule);
+  const [sheet, setSheet] = useState<'campus' | 'pickup' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const campus = ref.campus(campusId);
+  const pickup = ref.pickup(pickupId);
+  const classDate = parseSchedule(date, '12:00');
 
-  function edit(field: keyof Schedule) {
-    setDraft(schedule[field]);
+  function edit(field: 'date' | 'classTime') {
+    setDraft(field === 'date' ? date : classTime);
     setError('');
     setEditing(field);
   }
 
   function save() {
     if (!editing) return;
-    const candidate = { ...schedule, [editing]: draft.trim() };
-    const date = parseSchedule(candidate.date, candidate.classTime);
-    if (!date) {
+    const next = draft.trim();
+    const candidate = editing === 'date' ? parseSchedule(next, classTime) : parseSchedule(date, next);
+    if (!candidate) {
       setError(editing === 'date' ? 'Enter a valid date as YYYY-MM-DD.' : 'Enter a valid time as HH:MM (24-hour clock).');
       return;
     }
-    setSchedule(candidate);
+    if (editing === 'date') setDate(next); else setClassTime(next);
     setEditing(null);
   }
+
+  async function submit() {
+    if (busy) return;
+    if (!pickup) {
+      setError('Choose your pickup area.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    const res = await createRequest({ campusId, pickupAreaId: pickup.id, classStartAt: ammanInstant(date, classTime).toISOString() });
+    setBusy(false);
+    if (!res.ok) {
+      setError(errorCopy(res.code));
+      return;
+    }
+    router.push({ pathname: '/suggestion', params: { requestId: res.data.request_id } });
+  }
+
   return (
     <Page>
       <Header title="Plan a ride" eyebrow="RIDE DETAILS" onBack={() => router.dismissTo('/home')} />
       <RouteCard
-        start={{ label: 'PICKUP', title: 'Student Area, Irbid', detail: 'Al-Husn Road · current location' }}
-        end={{ label: 'DESTINATION', title: display.campus.label, detail: 'Tap to change university' }}
-        onEndPress={() => setSelectingCampus(true)}
+        start={{ label: 'PICKUP', title: pickup?.name ?? 'Choose pickup area', detail: pickup?.detail ?? 'Tap to choose where we pick you up' }}
+        end={{ label: 'DESTINATION', title: campus?.label ?? '…', detail: 'Tap to change university' }}
+        onEndPress={() => setSheet('campus')}
       />
       <Card style={styles.inputCard}>
-        <InfoRow icon={CalendarDays} label="Ride date" value={display.classDate} style={styles.divider} onPress={() => edit('date')} />
-        <InfoRow icon={Clock3} label="Class starts" value={display.classTime} onPress={() => edit('classTime')} />
+        <InfoRow icon={MapPin} label="Pickup area" value={pickup?.name ?? 'Choose'} style={styles.divider} onPress={() => setSheet('pickup')} />
+        <InfoRow icon={CalendarDays} label="Ride date" value={classDate ? formatDate(classDate) : date} style={styles.divider} onPress={() => edit('date')} />
+        <InfoRow icon={Clock3} label="Class starts" value={formatTime(ammanInstant(date, classTime))} onPress={() => edit('classTime')} />
       </Card>
       <View style={styles.map}>
         <Svg viewBox="0 0 350 176" preserveAspectRatio="none" style={StyleSheet.absoluteFill} width="100%" height="100%">
@@ -59,44 +95,60 @@ export function PlanRide() {
           <Path d="M20 136L292 9 M115 36L217 220" stroke="#FFFFFF" strokeWidth={11} />
         </Svg>
         <View style={styles.pickupPin}><MapPin size={20} color={color.brand} fill={color.brand} /></View>
-        <View style={styles.campusPin}><Copy size={11} tint={color.white} weight={800}>{display.campus.code[0]}</Copy></View>
-        <Copy size={8} weight={800} style={styles.mapLabel}>Student Area</Copy>
-        <Copy size={8} weight={800} style={styles.campusLabel}>{display.campus.code}</Copy>
+        <View style={styles.campusPin}><Copy size={11} tint={color.white} weight={800}>{campus?.code[0] ?? ''}</Copy></View>
+        <Copy size={8} weight={800} style={styles.mapLabel}>{pickup?.name ?? 'Pickup'}</Copy>
+        <Copy size={8} weight={800} style={styles.campusLabel}>{campus?.code ?? ''}</Copy>
         <Pressable accessibilityRole="button" style={styles.recenter}>
           <Navigation size={16} color={color.navy} /><Copy size={8} weight={700}>Recenter</Copy>
         </Pressable>
       </View>
       <Notice icon={ShieldCheck} tint="#44665D" style={styles.softNote}>Destinations are limited to verified university campuses.</Notice>
       {!!error && !editing && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
-      <Button icon={Sparkles} onPress={() => {
-        const start = parseSchedule(schedule.date, schedule.classTime);
-        if (!start || start.getTime() - 40 * 60_000 <= Date.now()) {
-          setError('Choose a date and class time at least 40 minutes from now.');
-          return;
-        }
-        router.push({ pathname: '/suggestion', params: schedule });
-      }} style={styles.action}>Find my group</Button>
-      {selectingCampus && (
-        <BottomSheet onClose={() => setSelectingCampus(false)}>
+      <Button icon={Sparkles} disabled={busy || !ref.ready} onPress={submit} style={styles.action}>{busy ? 'Finding…' : 'Find my group'}</Button>
+      {sheet === 'campus' && (
+        <BottomSheet onClose={() => setSheet(null)}>
           <Copy accessibilityRole="header" size={20} weight={800}>Choose a university</Copy>
           <Card style={styles.inputCard}>
-            {campuses.map((campus, index) => {
-              const selected = campus.id === schedule.campus;
+            {ref.campuses.map((item, index) => {
+              const selected = item.id === campusId;
               return (
-                <Pressable key={campus.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
-                  onPress={() => { setSchedule((current) => ({ ...current, campus: campus.id })); setSelectingCampus(false); }}
-                  style={[styles.campusOption, index < campuses.length - 1 && styles.divider, selected && styles.activeCampus]}>
+                <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
+                  onPress={() => { setCampusId(item.id); setSheet(null); }}
+                  style={[styles.campusOption, index < ref.campuses.length - 1 && styles.divider, selected && styles.activeCampus]}>
                   <Tile icon={MapPin} size={34} iconSize={17} />
                   <Pile gap={4} style={fill}>
-                    <Copy size={12} weight={800}>{campus.name}</Copy>
-                    <Copy size={10} tint={color.muted}>{campus.code}</Copy>
+                    <Copy size={12} weight={800}>{item.name}</Copy>
+                    <Copy size={10} tint={color.muted}>{item.code}</Copy>
                   </Pile>
                   {selected && <Check size={18} color={color.brand} />}
                 </Pressable>
               );
             })}
           </Card>
-          <Button tone="secondary" onPress={() => setSelectingCampus(false)}>Cancel</Button>
+          <Button tone="secondary" onPress={() => setSheet(null)}>Cancel</Button>
+        </BottomSheet>
+      )}
+      {sheet === 'pickup' && (
+        <BottomSheet onClose={() => setSheet(null)}>
+          <Copy accessibilityRole="header" size={20} weight={800}>Choose your pickup area</Copy>
+          <Card style={styles.inputCard}>
+            {ref.pickupAreas.map((item, index) => {
+              const selected = item.id === pickupId;
+              return (
+                <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
+                  onPress={() => { setPickupId(item.id); setError(''); setSheet(null); }}
+                  style={[styles.campusOption, index < ref.pickupAreas.length - 1 && styles.divider, selected && styles.activeCampus]}>
+                  <Tile icon={MapPin} size={34} iconSize={17} />
+                  <Pile gap={4} style={fill}>
+                    <Copy size={12} weight={800}>{item.name}</Copy>
+                    <Copy size={10} tint={color.muted}>{item.detail}</Copy>
+                  </Pile>
+                  {selected && <Check size={18} color={color.brand} />}
+                </Pressable>
+              );
+            })}
+          </Card>
+          <Button tone="secondary" onPress={() => setSheet(null)}>Cancel</Button>
         </BottomSheet>
       )}
       {editing && (
@@ -210,46 +262,68 @@ function ScheduleCell({ label, accessibilityLabel, selected, disabled = false, o
   );
 }
 
+/** Load one async result keyed by deps. */
+function useLoad<T>(load: () => Promise<{ ok: true; data: T } | { ok: false; code: string }>, deps: unknown[]) {
+  const [state, setState] = useState<{ data?: T; code?: string; loading: boolean }>({ loading: true });
+  useEffect(() => {
+    let live = true;
+    setState((s) => ({ ...s, loading: true }));
+    load().then((res) => { if (live) setState(res.ok ? { data: res.data, loading: false } : { code: res.code, loading: false }); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return state;
+}
+
 export function Suggestion() {
   const router = useRouter();
-  const schedule = useRideSchedule();
+  const { requestId } = useLocalSearchParams<{ requestId: string }>();
+  const ref = useRefData();
+  const { data, code, loading } = useLoad<Departure>(() => recommendDeparture(requestId), [requestId]);
+  if (loading || !data) {
+    return (
+      <Page>
+        <Header title="Departure plan" onBack={() => router.dismissTo('/plan')} />
+        <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Working out your departure…'}</Copy>
+        {!!code && <Button tone="secondary" onPress={() => router.dismissTo('/plan')}>Choose another time</Button>}
+      </Page>
+    );
+  }
+  const fallback = data.travel_source === 'fallback';
+  const departure = formatTime(data.departure_at);
+  const campus = ref.campus(data.campus_id);
   return (
     <Page>
       <Header title="Departure plan" onBack={() => router.dismissTo('/plan')} />
       <Pile gap={9} style={styles.aiHero}>
         <Tile icon={Sparkles} size={65} iconSize={30} tint="#7157D2" background="#E9E2FF" style={styles.aiOrb} />
-        <Badge tone="violet" style={styles.centered}>AI RECOMMENDATION</Badge>
+        <Badge tone={fallback ? 'amber' : 'violet'} style={styles.centered}>{fallback ? 'ESTIMATE' : 'RECOMMENDED'}</Badge>
         <Copy accessibilityRole="header" size={28} weight={800} style={[center, { letterSpacing: -1.12, marginTop: 8 }]}>
-          Leave at <Copy size={28} weight={800} tint="#6B50C7">{schedule.departure}</Copy>
+          Leave at <Copy size={28} weight={800} tint="#6B50C7">{departure}</Copy>
         </Copy>
-        <Copy tint={color.muted}>{`${schedule.classDate} · For your ${schedule.classTime} class at ${schedule.campus.code}`}</Copy>
+        <Copy tint={color.muted}>{`${formatDate(data.class_start_at)} · For your ${formatTime(data.class_start_at)} class at ${campus?.code ?? ''}`}</Copy>
       </Pile>
       <Card style={styles.timing}>
-        <Timing time={schedule.departure} label="DEPART" /><View style={styles.timingLine} />
-        <Timing time="32 min" label="EST. TRAVEL" /><View style={styles.timingLine} />
-        <Timing time={schedule.arrival} label="ARRIVE" />
+        <Timing time={departure} label="DEPART" /><View style={styles.timingLine} />
+        <Timing time={`${data.route_minutes} min`} label="EST. TRAVEL" /><View style={styles.timingLine} />
+        <Timing time={formatTime(data.arrival_at)} label="ARRIVE" />
       </Card>
-      <Row gap={13} style={styles.probability}>
-        <View style={styles.ring}>
-          <Svg width={58} height={58} style={StyleSheet.absoluteFill}>
-            <Circle cx={29} cy={29} r={26.5} fill={color.white} stroke="#D5E5E0" strokeWidth={5} />
-            <Path d="M29 2.5 A26.5 26.5 0 1 1 29 55.5 A26.5 26.5 0 1 1 29 2.5"
-              fill="none" stroke={color.brand} strokeWidth={5} strokeDasharray={[153.18, 166.5]} />
-          </Svg>
-          <Copy size={14} weight={800} tint={color.brand}>92<Copy size={7} weight={800} tint={color.brand}>%</Copy></Copy>
-        </View>
-        <Pile gap={5} style={fill}>
-          <Copy weight={800}>High chance you’ll be on time</Copy>
-          <Copy size={9} tint={color.muted} style={{ lineHeight: 13.5 }}>Includes traffic patterns and an 8-minute safety buffer.</Copy>
-        </Pile>
-      </Row>
-      <Notice icon={Info} tint="#615A72" style={{ backgroundColor: '#F6F3FF', alignItems: 'flex-start' }}>This is an AI estimate, not a guarantee. Live conditions may change.</Notice>
+      <Pile gap={7} style={styles.facts}>
+        <Fact icon={Clock3} text={`Arrives ${data.minutes_before_class} min before class`} />
+        {data.peak_factor > 1 && <Fact icon={TrendingUp} text="Includes peak-hour traffic factor" />}
+        {data.alternative && <Fact icon={Route} text={`Another group leaves at ${formatTime(data.alternative.departure_at)}`} />}
+      </Pile>
+      {fallback && <Notice icon={Info} tint="#735C23">Estimate. Live travel data unavailable.</Notice>}
       <Pile gap={9} style={styles.action}>
-        <Button onPress={() => router.push({ pathname: '/matching', params: schedule.params })}>{`Accept ${schedule.departure} & search`}</Button>
+        <Button onPress={() => router.push({ pathname: '/matching', params: { requestId } })}>{`Accept ${departure} & search`}</Button>
         <Button tone="secondary" onPress={() => router.dismissTo('/plan')}>Choose another time</Button>
       </Pile>
     </Page>
   );
+}
+
+function Fact({ icon: Icon, text }: { icon: typeof Route; text: string }) {
+  return <Row gap={8}><Icon size={16} color={color.muted} /><Copy size={11} tint={color.muted} style={fill}>{text}</Copy></Row>;
 }
 
 function Timing({ time, label }: { time: string; label: string }) {
@@ -258,38 +332,77 @@ function Timing({ time, label }: { time: string; label: string }) {
   </Pile>;
 }
 
-const groupFilters = ['Girls-only', 'Boys-only', 'Any'] as const;
-type GroupFilter = (typeof groupFilters)[number];
+const filterOptions: { label: string; pref: Pref }[] = [
+  { label: 'Girls-only', pref: 'girls_only' },
+  { label: 'Boys-only', pref: 'boys_only' },
+  { label: 'Any', pref: 'any' },
+];
+const prefBadge: Record<Pref, { label: string; tone: 'rose' | 'slate' | 'violet' }> = {
+  girls_only: { label: 'Girls-only', tone: 'rose' },
+  boys_only: { label: 'Boys-only', tone: 'violet' },
+  any: { label: 'Any', tone: 'slate' },
+};
 
 export function Matching() {
   const router = useRouter();
-  const schedule = useRideSchedule();
-  const [filter, setFilter] = useState<GroupFilter>('Girls-only');
-  const [empty, setEmpty] = useState(false);
-  const selectFilter = (value: GroupFilter) => {
-    setFilter(value);
-    setEmpty(value === 'Boys-only');
-  };
-  const openGroup = () => router.push({ pathname: '/group', params: schedule.params });
+  const { requestId } = useLocalSearchParams<{ requestId: string }>();
+  const { profile } = useAuth();
+  const ref = useRefData();
+  const [pref, setPref] = useState<Pref>(profile?.gender === 'male' ? 'boys_only' : 'girls_only');
+  const [result, setResult] = useState<SearchResult | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const dep = useLoad<Departure>(() => recommendDeparture(requestId), [requestId]);
+
+  useEffect(() => {
+    let live = true;
+    setError('');
+    searchGroups(requestId, pref).then((res) => {
+      if (!live) return;
+      if (res.ok) setResult(res.data); else setError(errorCopy(res.code));
+    });
+    return () => { live = false; };
+  }, [requestId, pref]);
+
+  const request = dep.data;
+  const planParams = request ? {
+    campusId: request.campus_id, pickupAreaId: request.pickup_area_id,
+    date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Amman' }).format(new Date(request.class_start_at)),
+    classTime: new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Amman', hour: '2-digit', minute: '2-digit' }).format(new Date(request.class_start_at)),
+  } : {};
+
+  async function startNewGroup() {
+    if (busy) return;
+    setBusy(true);
+    const res = await createGroup(requestId);
+    setBusy(false);
+    if (!res.ok) { setError(errorCopy(res.code)); return; }
+    router.push({ pathname: '/group', params: { groupId: res.data.group_id, requestId } });
+  }
+  const open = (c: Candidate) => router.push({ pathname: '/group', params: { groupId: c.group_id, requestId } });
+  const candidates = result?.candidates ?? [];
+
   return (
     <Page>
-      <Header title="Suggested groups" onBack={() => router.dismissTo('/suggestion')}
-        action={<IconButton icon={Zap} label="Toggle match results" onPress={() => setEmpty((value) => !value)} />} />
+      <Header title="Suggested groups" onBack={() => router.dismissTo({ pathname: '/suggestion', params: { requestId } })} />
       <Row style={[spread, styles.routeSummary]}>
-        <Row gap={8}><MapPin size={18} color={color.brand} /><TimingStop title="Student Area" detail="Pickup" /></Row>
+        <Row gap={8}><MapPin size={18} color={color.brand} /><TimingStop title={ref.pickup(request?.pickup_area_id)?.name ?? '…'} detail="Pickup" /></Row>
         <ArrowRight size={18} color={color.muted} />
-        <Row gap={8}><View style={styles.campusDot}><Copy size={11} weight={800} tint={color.white}>{schedule.campus.code[0]}</Copy></View>
-          <TimingStop title={schedule.campus.code} detail={`${schedule.departureDate} · ${schedule.departure}`} /></Row>
+        <Row gap={8}><View style={styles.campusDot}><Copy size={11} weight={800} tint={color.white}>{ref.campus(request?.campus_id)?.code[0] ?? ''}</Copy></View>
+          <TimingStop title={ref.campus(request?.campus_id)?.code ?? '…'}
+            detail={request ? `${formatDate(request.arrival_at)} · arrive ${formatTime(request.arrival_at)}` : ''} /></Row>
       </Row>
       <Row gap={7} style={styles.filters}>
-        {groupFilters.map((item) => (
-          <Pressable key={item} accessibilityRole="button" accessibilityState={{ selected: filter === item }}
-            onPress={() => selectFilter(item)} style={[styles.filter, filter === item && styles.filterSelected]}>
-            <Copy size={9} weight={700} tint={filter === item ? color.brand : color.muted}>{item}</Copy>
+        {filterOptions.map((item) => (
+          <Pressable key={item.pref} accessibilityRole="button" accessibilityState={{ selected: pref === item.pref }}
+            onPress={() => { setResult(null); setPref(item.pref); }} style={[styles.filter, pref === item.pref && styles.filterSelected]}>
+            <Copy size={9} weight={700} tint={pref === item.pref ? color.brand : color.muted}>{item.label}</Copy>
           </Pressable>
         ))}
       </Row>
-      {empty ? (
+      {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
+      {!result && !error && <Copy tint={color.muted}>Searching groups…</Copy>}
+      {result && candidates.length === 0 && (
         <Pile gap={9} style={styles.empty}>
           <View style={styles.emptyIcon}>
             <Users size={35} color="#92A19D" />
@@ -297,49 +410,59 @@ export function Matching() {
           </View>
           <Copy accessibilityRole="header" size={21} weight={800} style={center}>No match found yet</Copy>
           <Copy size={11} tint={color.muted} style={[center, { lineHeight: 18, marginBottom: 13 }]}>
-            We couldn’t find a suitable group for this time and preference.
+            {errorCopy(result.reason ?? 'NO_GROUPS_AT_TIME')}
           </Copy>
-          <Button onPress={() => selectFilter('Any')}>Keep request active</Button>
-          <Button tone="secondary" onPress={() => router.dismissTo('/plan')}>Adjust departure time</Button>
+          <Button disabled={busy} onPress={startNewGroup}>Start a new group</Button>
+          <Button tone="secondary" onPress={() => router.dismissTo({ pathname: '/plan', params: planParams })}>Change class time</Button>
+          <Button tone="secondary" onPress={() => router.dismissTo({ pathname: '/plan', params: planParams })}>Change pickup</Button>
         </Pile>
-      ) : (
+      )}
+      {candidates.length > 0 && (
         <Pile gap={11}>
-          <Row style={spread}><Copy size={10} weight={700}>3 matches near you</Copy><Badge tone="violet" icon={Sparkles}>AI ranked</Badge></Row>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Best match, ${schedule.departure}`} onPress={openGroup} style={[styles.groupCard, styles.featured]}>
-            <Row gap={4} style={styles.bestMatch}>
-              <Star size={14} color={color.brand} fill={color.brand} />
-              <Copy size={8} weight={800} tint={color.brand}>BEST MATCH</Copy>
-            </Row>
-            <Row style={[spread, { alignItems: 'flex-start' }]}>
-              <Pile gap={7}><GroupTime time={schedule.departure} /><Badge tone="rose">Girls-only</Badge></Pile>
-              <Copy size={17} weight={800}>1.50 <Copy size={8} tint={color.muted}>JD / seat</Copy></Copy>
-            </Row>
-            <Row gap={4} style={styles.seats}>
-              {[1, 2, 3, 4].map((number) => (
-                <View key={number} style={[styles.seat, number < 4 && { backgroundColor: color.pink, borderWidth: 0 }]}>
-                  <CircleUserRound size={19} color={number < 4 ? color.brand : '#9BA8A5'} />
-                </View>
-              ))}
-              <Pile gap={3} style={{ marginLeft: 7 }}><Copy size={10} weight={800}>3/4 seats filled</Copy><Copy size={8} tint="#B64F44">1 seat left</Copy></Pile>
-            </Row>
-            <Row gap={14} style={styles.matchFacts}>
-              <MatchFact icon={Route} title="94% route match" /><MatchFact icon={Clock3} title="Leaves on time" />
-            </Row>
-            <Row gap={7} style={styles.onTime}><Sparkles size={17} color="#654EBA" />
-              <Copy size={9} weight={800} tint="#654EBA" style={fill}>92% chance you’re on time</Copy><Info size={15} color="#654EBA" />
-            </Row>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Group, ${schedule.alternate}`} onPress={openGroup} style={[styles.groupCard, styles.compactGroup]}>
-            <Pile gap={4}><GroupTime time={schedule.alternate} /><Badge tone="slate">Any</Badge></Pile>
-            <Copy size={9} tint={color.muted} style={{ flex: 1, textAlign: 'right' }}>2/4 seats · 1.50 JD</Copy>
-            <ChevronRight size={18} color={color.muted} />
-          </Pressable>
+          <Copy size={10} weight={700}>{`${candidates.length} ${candidates.length === 1 ? 'group' : 'groups'} for your time`}</Copy>
+          {candidates.map((c, index) => <GroupCard key={c.group_id} c={c} best={index === 0} onPress={() => open(c)} />)}
           <Row gap={6} style={{ padding: 4 }}><Info size={15} color={color.muted} />
             <Copy size={9} tint={color.muted} style={fill}>JUNI suggests groups. You always choose before booking.</Copy>
           </Row>
         </Pile>
       )}
     </Page>
+  );
+}
+
+function GroupCard({ c, best, onPress }: { c: Candidate; best: boolean; onPress: () => void }) {
+  const badge = prefBadge[c.pref];
+  const left = c.capacity - c.seats_taken;
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${best ? 'Best match, ' : 'Group, '}${formatTime(c.departure_at)}`}
+      onPress={onPress} style={[styles.groupCard, best && styles.featured]}>
+      {best && (
+        <Row gap={4} style={styles.bestMatch}>
+          <Star size={14} color={color.brand} fill={color.brand} />
+          <Copy size={8} weight={800} tint={color.brand}>BEST MATCH</Copy>
+        </Row>
+      )}
+      <Row style={[spread, { alignItems: 'flex-start' }]}>
+        <Pile gap={7}><GroupTime time={formatTime(c.departure_at)} /><Badge tone={badge.tone}>{badge.label}</Badge></Pile>
+        <Copy size={17} weight={800}>{formatFils(c.fare_fils, false)} <Copy size={8} tint={color.muted}>JD / seat</Copy></Copy>
+      </Row>
+      <Row gap={4} style={styles.seats}>
+        {Array.from({ length: c.capacity }, (_, i) => i + 1).map((number) => (
+          <View key={number} style={[styles.seat, number <= c.seats_taken && { backgroundColor: color.pink, borderWidth: 0 }]}>
+            <CircleUserRound size={19} color={number <= c.seats_taken ? color.brand : '#9BA8A5'} />
+          </View>
+        ))}
+        <Pile gap={3} style={{ marginLeft: 7 }}>
+          <Copy size={10} weight={800}>{`${c.seats_taken}/${c.capacity} seats filled`}</Copy>
+          <Copy size={8} tint={left === 1 ? '#B64F44' : color.muted}>{`${left} ${left === 1 ? 'seat' : 'seats'} left`}</Copy>
+        </Pile>
+      </Row>
+      <Row gap={14} style={styles.matchFacts}>
+        <MatchFact icon={Clock3} title={`Your pickup ${formatTime(c.pickup_at)}`} />
+        {c.added_minutes > 0 && <MatchFact icon={Route} title={`+${c.added_minutes} min`} />}
+        {c.travel_source === 'fallback' && <MatchFact icon={Info} title="Estimate" />}
+      </Row>
+    </Pressable>
   );
 }
 
@@ -358,35 +481,54 @@ function MatchFact({ icon: Icon, title }: { icon: typeof Route; title: string })
 
 export function GroupDetails() {
   const router = useRouter();
-  const schedule = useRideSchedule();
+  const { groupId, requestId } = useLocalSearchParams<{ groupId: string; requestId: string }>();
+  const ref = useRefData();
+  const { data, code, loading } = useLoad<GroupDetailData>(() => groupDetail(groupId, requestId), [groupId, requestId]);
+  const back = () => router.dismissTo({ pathname: '/matching', params: { requestId } });
+  if (loading || !data) {
+    return (
+      <Page>
+        <Header title="Group details" onBack={back} />
+        <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Loading group…'}</Copy>
+      </Page>
+    );
+  }
+  const badge = prefBadge[data.pref];
+  const pickupName = ref.pickup(data.pickup_area_id)?.name ?? 'Pickup';
+  const left = data.capacity - data.seats_taken;
   return (
     <Page>
-      <Header title="Group details" onBack={() => router.dismissTo('/matching')} />
+      <Header title="Group details" onBack={back} />
       <View style={{ padding: 18, borderRadius: 18, backgroundColor: color.navy }}>
-        <Row gap={5}><Badge tone="rose">Girls-only</Badge><Badge tone="violet" icon={Sparkles}>92% on time</Badge></Row>
-        <RouteTitle light marginTop={18} destination={schedule.campus.code} />
-        <Copy size={10} tint="#CFC5DA">{`${schedule.departureDate} · Departure at ${schedule.departure}`}</Copy>
+        <Row gap={5}><Badge tone={badge.tone}>{badge.label}</Badge>{data.travel_source === 'fallback' && <Badge tone="amber">Estimate</Badge>}</Row>
+        <RouteTitle light marginTop={18} pickup={pickupName} destination={ref.campus(data.campus_id)?.code ?? ''} />
+        <Copy size={10} tint="#CFC5DA">{`${formatDate(data.departure_at)} · Departs ${formatTime(data.departure_at)} · Your pickup ${formatTime(data.pickup_at)}`}</Copy>
+        <Copy size={10} tint="#CFC5DA">{`Stops: ${data.stops.join(' → ')}`}</Copy>
       </View>
       <Row gap={5} style={styles.seatSummary}>
-        <SeatStat number="3" label="reserved" /><View style={styles.seatDivider} />
-        <SeatStat number="1" label="seat left" /><View style={styles.seatDivider} />
-        <SeatStat number="4" label="max seats" />
+        <SeatStat number={String(data.seats_taken)} label="reserved" /><View style={styles.seatDivider} />
+        <SeatStat number={String(left)} label={left === 1 ? 'seat left' : 'seats left'} /><View style={styles.seatDivider} />
+        <SeatStat number={String(data.capacity)} label="max seats" />
       </Row>
       <SectionHeading title="Your ride group" note="Verified only" />
       <View style={styles.memberList}>
-        {['Lina A.', 'Rama K.', 'Noor M.'].map((name, index) => (
-          <Row key={name} style={styles.member}>
-            <Avatar name={name[0]} index={index} size={34} /><Copy size={11} weight={800} style={fill}>{name}</Copy><Badge icon={BadgeCheck}>Verified</Badge>
+        {data.members.map((member, index) => (
+          <Row key={`${member.first_name}-${index}`} style={styles.member}>
+            <Avatar name={member.first_name[0]} index={index} size={34} />
+            <Copy size={11} weight={800} style={fill}>{member.first_name}</Copy>
+            {member.verified && <Badge icon={BadgeCheck}>Verified</Badge>}
           </Row>
         ))}
-        <Row style={[styles.member, styles.openSeat]}>
-          <Tile icon={UserPlus} size={34} iconSize={18} background="transparent" style={styles.emptyAvatar} />
-          <Copy size={11} weight={800} tint={color.brand}>This seat could be yours</Copy>
-        </Row>
+        {left > 0 && (
+          <Row style={[styles.member, styles.openSeat]}>
+            <Tile icon={UserPlus} size={34} iconSize={18} background="transparent" style={styles.emptyAvatar} />
+            <Copy size={11} weight={800} tint={color.brand}>This seat could be yours</Copy>
+          </Row>
+        )}
       </View>
       <Row gap={0} style={styles.fare}>
-        <Fare label="Your fare" value="1.50 JD" />
-        <Fare label="Total car fare cap" value="6.00 JD" />
+        <Fare label="Your fare" value={formatFils(data.fare_fils)} />
+        <Fare label="Total car fare cap" value={formatFils(data.fare_cap_fils)} />
       </Row>
       <Card style={styles.policy}>
         <Row gap={8} style={{ marginBottom: 3 }}><ShieldCheck size={19} color="#5F552F" /><Copy weight={800} tint="#5F552F">Cancellation policy</Copy></Row>
@@ -394,17 +536,19 @@ export function GroupDetails() {
         <PolicyRow icon={X} label="Less than 12 hours: " outcome="no refund" />
         <PolicyRow icon={LockKeyhole} label="After trip starts: cancellation unavailable" />
       </Card>
-      <Button onPress={() => router.push({ pathname: '/summary', params: schedule.params })} style={styles.action}>Book & prepay · 1.50 JD</Button>
+      <Button onPress={() => router.push({ pathname: '/summary', params: {
+        groupId: data.group_id, requestId, routeVersion: String(data.route_version), pickupAreaId: data.pickup_area_id,
+      } })} disabled={data.full || data.over_cap} style={styles.action}>{`Book & prepay · ${formatFils(data.fare_fils)}`}</Button>
     </Page>
   );
 }
 
-export function RouteTitle({ light = false, marginTop = 10, destination }: {
-  light?: boolean; marginTop?: number; destination: string;
+export function RouteTitle({ light = false, marginTop = 10, pickup, destination }: {
+  light?: boolean; marginTop?: number; pickup: string; destination: string;
 }) {
   const tint = light ? color.white : color.navy;
   return <Row gap={8} style={{ marginTop, marginBottom: 6, flexWrap: 'wrap' }}>
-    <Copy size={17} weight={800} tint={tint}>Student Area</Copy><ArrowRight size={19} color={tint} /><Copy size={17} weight={800} tint={tint}>{destination}</Copy>
+    <Copy size={17} weight={800} tint={tint}>{pickup}</Copy><ArrowRight size={19} color={tint} /><Copy size={17} weight={800} tint={tint}>{destination}</Copy>
   </Row>;
 }
 
@@ -444,6 +588,7 @@ const styles = StyleSheet.create({
   centered: { alignSelf: 'center' },
   timing: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderColor: '#ECE7FA', paddingVertical: 17, paddingHorizontal: 15, borderRadius: 16 },
   timingLine: { width: '10%', height: 1, backgroundColor: '#DCD5EE' },
+  facts: { marginVertical: 14, padding: 15, borderRadius: 16, backgroundColor: '#F4F9F7' },
   probability: { marginVertical: 14, padding: 15, borderRadius: 16, backgroundColor: '#F4F9F7' },
   ring: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center' },
   routeSummary: { padding: 13, borderRadius: 14, backgroundColor: color.sage },
