@@ -1,3 +1,5 @@
+> Not used by the Replit build. See docs/replit-handoff.md §6.
+
 # JUNI authentication setup
 
 1. In your Supabase project, enable **Phone** sign-in and configure an SMS provider that can deliver to the numbers you intend to test. Also enable the **Email** provider and keep **Confirm email** enabled.

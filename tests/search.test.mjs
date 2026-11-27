@@ -84,3 +84,19 @@ test('create_group starts an open group with the rider preference and one stop, 
   const cand2 = (await one(c, 'select core.create_group($1::uuid,$2::uuid,$3::timestamptz) as r', [male, req2.request_id, NOW])).r;
   assert.equal((await group(c, cand2.group_id)).pref, 'any');
 });
+
+test('group_detail hides groups the rider cannot join and groups at another campus', async () => {
+  const g = await mkGroup(c, { pref: 'girls_only', members: [{ area: 'hawara', gender: 'female' }] });
+  const omar = await mkProfile(c, { gender: 'male' });
+  const req = await makeRequest(c, omar, { area: 'ramtha' });
+  const detail = 'select core.group_detail($1::uuid,$2::uuid,$3::uuid,$4::timestamptz) as r';
+  const { expectFail } = await import('./helpers.mjs');
+  await expectFail(c, 'PREF_MISMATCH', detail, [omar, g.groupId, req.request_id, NOW]);
+  const salma = await mkProfile(c, { gender: 'female' });
+  const reqY = await makeRequest(c, salma, { area: 'hawara', campus: 'yarmouk' });
+  await expectFail(c, 'GROUP_NOT_FOUND', detail, [salma, g.groupId, reqY.request_id, NOW]);
+  const reqOk = await makeRequest(c, salma, { area: 'hawara' });
+  const d = (await one(c, detail, [salma, g.groupId, reqOk.request_id, NOW])).r;
+  assert.equal(d.group_id, g.groupId);
+  assert.equal(d.members.length, 1);
+});

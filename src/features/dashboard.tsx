@@ -7,18 +7,18 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useState } from 'react';
 import { Badge, center, Copy, Eyebrow, fill, GradientCard, Header, InfoRow, Page, Pile, ProgressBar, Row, SectionHeading, spread, TextLink, Tile } from '@/components/ui';
 import { color, shadow } from '@/theme';
-import { authClient, studentName, useAuth } from '@/features/authSession';
+import { useAuth } from '@/features/authSession';
 
 export function HomeScreen() {
   const router = useRouter();
-  const { user, demoActive } = useAuth();
+  const { profile } = useAuth();
   return (
     <Page>
       <Row style={styles.homeHeader}>
         <Pile gap={7} style={fill}>
           <Eyebrow tint={color.muted} size={9}>MONDAY, 14 APRIL</Eyebrow>
-          <Copy accessibilityRole="header" size={28} weight={800} style={{ letterSpacing: -1.4 }}>{`Hi, ${studentName(user).split(/\s+/)[0]}`}</Copy>
-          <Badge icon={BadgeCheck} iconSize={14}>{demoActive ? 'Demo mode' : 'Verified student'}</Badge>
+          <Copy accessibilityRole="header" size={28} weight={800} style={{ letterSpacing: -1.4 }}>{`Hi, ${profile?.fullName.split(/\s+/)[0] ?? 'there'}`}</Copy>
+          <Badge icon={BadgeCheck} iconSize={14}>{profile?.isDemo ? 'Demo mode · simulated verification' : 'Verified student'}</Badge>
         </Pile>
         <Pressable accessibilityRole="button" accessibilityLabel="240 points" onPress={() => router.navigate('/points')} style={styles.pointsPill}>
           <Coins size={17} color="#BD861D" />
@@ -83,29 +83,18 @@ export function HomeScreen() {
 
 export function Profile() {
   const router = useRouter();
-  const { user, demoActive, exitDemo } = useAuth();
-  const name = studentName(user);
+  const { profile, signOut } = useAuth();
+  const name = profile?.fullName ?? 'Student';
   const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-  const [logoutError, setLogoutError] = useState('');
   const [signingOut, setSigningOut] = useState(false);
   const inactive = () => {};
 
   async function logOut() {
-    if (demoActive) {
-      exitDemo();
-      return;
-    }
-    if (!authClient || signingOut) return;
+    if (signingOut) return;
     setSigningOut(true);
-    setLogoutError('');
-    try {
-      const { error } = await authClient.auth.signOut({ scope: 'local' });
-      if (error) throw error;
-    } catch (cause) {
-      setLogoutError(cause instanceof Error ? cause.message : 'Could not log out. Try again.');
-    } finally {
-      setSigningOut(false);
-    }
+    await signOut();
+    setSigningOut(false);
+    router.replace('/login');
   }
 
   return (
@@ -116,13 +105,9 @@ export function Profile() {
           <Copy size={20} weight={800} tint="#146750">{initials}</Copy>
         </GradientCard>
         <Copy accessibilityRole="header" size={20} weight={800} style={center}>{name}</Copy>
-        <Copy size={9} tint={color.muted}>{user?.email}</Copy>
-        <Badge icon={BadgeCheck} iconSize={14} style={{ alignSelf: 'center' }}>{demoActive ? 'Demo mode' : 'Verified student'}</Badge>
+        <Copy size={9} tint={color.muted}>{profile?.gender === 'female' ? 'Female' : 'Male'}</Copy>
+        <Badge icon={BadgeCheck} iconSize={14} style={{ alignSelf: 'center' }}>{profile?.isDemo ? 'Demo mode · simulated verification' : 'Verified student'}</Badge>
       </Pile>
-      {!demoActive && <Pile gap={7} style={styles.profileSection}>
-        <Eyebrow>UNIVERSITY</Eyebrow>
-        <View style={styles.profileRows}><InfoRow icon={ShieldCheck} label="Verified university email" value={user?.email ?? ''} /></View>
-      </Pile>}
       <Pile gap={7} style={styles.profileSection}>
         <Eyebrow>RIDE PREFERENCES</Eyebrow>
         <View style={styles.profileRows}>
@@ -137,7 +122,6 @@ export function Profile() {
           <InfoRow icon={Coins} label="JUNI Points" value="240 points" onPress={() => router.navigate('/points')} />
         </View>
       </Pile>
-      {!!logoutError && <Copy accessibilityRole="alert" tint={color.danger}>{logoutError}</Copy>}
       <TextLink tint="#BC4242" size={11} style={styles.signout}
         onPress={logOut}>{signingOut ? 'Logging out…' : 'Log out'}</TextLink>
     </Page>
