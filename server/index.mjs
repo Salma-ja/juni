@@ -15,6 +15,7 @@ export function createApp() {
   });
 
   const dist = path.join(ROOT, 'dist');
+  app.use('/.well-known', express.static(path.join(dist, '.well-known')));
   app.use(express.static(dist));
   app.get('*', (req, res, next) => {
     if (path.extname(req.path)) return next();

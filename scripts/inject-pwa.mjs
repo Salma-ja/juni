@@ -1,4 +1,4 @@
-// Post-build: add PWA tags (manifest, icons, service worker) to dist/index.html.
+// Post-build: add PWA tags (manifest, icons, service worker) and Digital Asset Links to dist/.
 import fs from 'node:fs';
 const file = new URL('../dist/index.html', import.meta.url);
 let html = fs.readFileSync(file, 'utf8');
@@ -11,4 +11,11 @@ if (!html.includes('rel="manifest"')) {
   </head>`;
   html = html.replace('</head>', tags);
   fs.writeFileSync(file, html);
+}
+
+const srcAssetLinks = new URL('../public/.well-known/assetlinks.json', import.meta.url);
+if (fs.existsSync(srcAssetLinks)) {
+  const destDir = new URL('../dist/.well-known', import.meta.url);
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.copyFileSync(srcAssetLinks, new URL('../dist/.well-known/assetlinks.json', import.meta.url));
 }

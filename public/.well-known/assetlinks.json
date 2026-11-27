@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.juni.carpool",
+      "sha256_cert_fingerprints": [
+        "F1:B5:CA:E1:FB:BE:A2:D4:8E:67:B8:7F:5F:5C:B5:A8:F9:9D:20:12:F7:6A:74:0F:64:8F:B1:9E:82:BB:FD:91"
+      ]
+    }
+  }
+]
