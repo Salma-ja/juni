@@ -14,8 +14,8 @@ This file is the **single source of truth** for building the working JUNI demo i
 
 | # | Decision |
 | --- | --- |
-| D1 | **Backend:** Supabase Postgres is the source of truth. Every business rule lives in SQL functions called over RPC. Replit hosts the Expo web build and runs scripts, and holds no app state. |
-| D2 | **Auth:** keep the real phone and university-email OTP, plus a one-tap **Demo student** login that grants simulated verified status (§6). |
+| D1 | **Backend:** plain PostgreSQL (Replit's built-in database, no Supabase). Every business rule lives in SQL functions in the `core` schema. A small Node **Express** server in `server/` exposes them as JSON endpoints and also serves the Expo web build, so the app and the API share one origin. |
+| D2 | **Auth:** demo-only for this build. A judge taps **Continue as demo student**, picks Salma or Omar, and gets a server session with simulated verified status (§6). Real phone and university-email OTP is out of scope (§13). |
 | D3 | **Delivery:** judges open one web link. The Expo web build is shown in the existing 430 px phone frame. |
 | D4 | **Fares:** distance-weighted split under the JOD 6.00 car cap, in integer fils, with the accepted fare frozen per booking (§5.3). |
 
@@ -27,7 +27,7 @@ This file is the **single source of truth** for building the working JUNI demo i
 | A2 | Pickup is chosen from the fixed list of 8 pickup areas in §7.2. No free map pin. |
 | A3 | **Changed from the first draft:** travel time is computed deterministically in SQL from seeded coordinates (§5.1). There is no live routing API in this build. Reason: a client-fetched duration would let the client set its own fare inputs, and an external API adds a failure point during judging. Live routing is listed in §13 as later work. |
 | A4 | A seeded captain pool. There is no captain app. Captains are assigned automatically or from the demo panel (§5.6, §8). |
-| A5 | Gender is self-declared at registration, copied into `profiles.gender` once and immutable afterwards. Rules never read `user_metadata`. |
+| A5 | Gender is chosen with the demo persona and stored in `profiles.gender`, immutable afterwards. Rules read only that column. |
 | A6 | Timezone `Asia/Amman` (UTC+3, no DST). Week is Sunday to Thursday. Store `timestamptz` (UTC) and format in `Asia/Amman`. |
 | A7 | English only. |
 | A8 | Unmatched, below-floor-at-deadline, and captain- or platform-cancelled bookings get a full refund. |
@@ -60,7 +60,7 @@ Build strictly in this order. Ship P0 before touching P1.
 | Priority | Scope |
 | --- | --- |
 | **P0: must work for judging** | Demo login (both personas) → plan (campus, date, class time, pickup) → departure recommendation → search → group details → checkout hold → simulated payment → awaiting captain → demo-panel captain confirm → My Rides → cancel on both sides of 12 h with the refund shown. T01–T12 green. Deployed link works on a phone browser. |
-| **P1: should work** | Real OTP on the hosted project. Panel actions: expire hold, failed payment, last-seat race, clock offset, routing outage, start and complete trip, reset. Trip, tracking and safety screens read the real booking. SOS writes an incident. X1–X6 green. |
+| **P1: should work** | Panel actions: expire hold, failed payment, last-seat race, clock offset, routing outage, start and complete trip, reset. Trip, tracking and safety screens read the real booking. SOS writes an incident. X1–X6 green. |
 | **P2: drop first** | Data-driven `rules.tsx` showcase, profile edits, live routing, notifications. |
 
 **Definition of done.** Every phase's exit commands pass. The §12 journey script passes on the deployed URL in a fresh browser profile. No screen shows a hard-coded fare, seat count, captain, member name or ID. `npm run typecheck` and `npm test` pass.
@@ -70,40 +70,39 @@ Build strictly in this order. Ship P0 before touching P1.
 ## 3. Architecture
 
 ```text
-Browser ── Expo web bundle (served by scripts/serve.mjs on Replit)
-            │  supabase-js, publishable key + user JWT
+Browser ── Expo web bundle (static files in dist/)
+            │  fetch('/api/...')  same origin, Authorization: Bearer <session token>
             ▼
-Supabase ── Auth (phone OTP, email OTP, anonymous sign-in for demo)
-         └─ Postgres
-              ├─ tables + RLS (read own rows, no direct writes)
-              ├─ public.rpc_*  wrappers: resolve caller + clock, call core.*
-              └─ core.*        internal functions: all rules, take (profile_id, now)
-Replit scripts ── scripts/migrate.mjs, scripts/seed.mjs, tests (Node + pg, SUPABASE_DB_URL)
+Replit ── server/index.mjs (Express)
+            ├─ serves dist/ with SPA fallback
+            └─ /api/*  resolve session → profile → run core.* in one transaction
+            ▼
+PostgreSQL (Replit built-in) ── schema core.* (all rules), tables in public
+Replit scripts ── scripts/migrate.mjs, scripts/seed.mjs, tests (Node + pg)
 ```
 
-- The client calls `rpc_*` functions only. It never inserts or updates `bookings`, `seat_holds`, `payments`, `refunds`, `groups` or `profiles`.
-- `public.rpc_*` functions are `security definer`, set `search_path = public, core`, and resolve the caller with `auth.uid()` → `profiles.auth_user_id`. They read the clock with `core.app_now(profile_id)` (§8.2) and call the matching `core.*` function. `grant execute` on them to `authenticated` only.
-- Rule functions live in a separate schema **`core`**, which PostgREST does not expose. Run `revoke all on schema core from public, anon, authenticated`. Tests call `core.*` directly over `SUPABASE_DB_URL`. In this document, `core_x` means `core.x`.
-- Every mutating `rpc_*` takes `p_idempotency_key uuid`. A repeat with the same key returns the stored result and changes nothing.
-- Errors are raised as `raise exception using errcode = 'P0001', message = '<CODE>'`. The client maps `<CODE>` to copy in §9.3.
+- The client talks to `/api/*` only. It has no database access and no database credentials.
+- **Endpoint shape:** `POST /api/<name>` with a JSON body, where `<name>` is one of the endpoints in §9.1. Success returns HTTP 200 and `{ok:true,data}`. A rule error returns HTTP 400 and `{ok:false,code,message}`. A missing or invalid session returns HTTP 401 `{ok:false,code:'NO_SESSION'}`. Anything else returns HTTP 500 `{ok:false,code:'SERVER_ERROR'}`.
+- **Handler pattern:** read the `Authorization` header → find the row in `sessions` → load the profile → `begin` → call the matching `core.*` function with `p_profile` and `p_now = core.app_now(profile)` → `commit`. A `core` error (`errcode P0001`) rolls back and its message becomes `code`.
+- Rule functions live in schema **`core`**. There are no `public` wrapper functions and no row-level security. The API server is the only database client besides scripts and tests. Run the server with a database user that cannot create roles or extensions (the default Replit user is fine).
+- Every mutating endpoint accepts `idempotencyKey` (uuid). A repeat with the same key returns the stored result and changes nothing.
+- In this document, `core_x` means the SQL function `core.x`.
 
-### Secrets
+### Secrets and environment
 
-| Name | Where | Used by |
+| Name | Source | Used by |
 | --- | --- | --- |
-| `EXPO_PUBLIC_SUPABASE_URL` | Replit secret | Web bundle (baked in at build time) |
-| `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Replit secret | Web bundle |
-| `EXPO_PUBLIC_JUNI_STUDENT_EMAIL_DOMAINS` | Replit secret, `just.edu.jo,ses.yu.edu.jo,inu.edu.jo` | Web bundle |
-| `EXPO_PUBLIC_DEMO_LOGIN_ENABLED` | Replit secret, `true` | Web bundle |
-| `SUPABASE_DB_URL` | Replit secret, **never** `EXPO_PUBLIC_` | Migrations, seed, tests only |
+| `DATABASE_URL` | Provided by Replit when the PostgreSQL database is added | Server, migrations, seed, tests |
+| `PORT` | Provided by Replit | Server (default 3000) |
+| `JUNI_DEMO_LOGIN_ENABLED` | Replit secret, `true` | Server. `POST /api/demo/claim` returns 403 `DEMO_DISABLED` when it is not `true`. |
 
-`EXPO_PUBLIC_*` values are compiled into the bundle, so they must be set **before** `npm run build:web`. No service-role key is used anywhere.
+There are no `EXPO_PUBLIC_*` variables. The client fetches `GET /api/config` for `{demoLoginEnabled}`.
 
 ---
 
 ## 4. Data model
 
-Files, in apply order: `supabase/migrations/0001_schema.sql`, `0003_rls.sql`, `0004_auth_sync.sql`, `0005_reference_data.sql` (Phase 1), then `0006_functions*.sql` (Phase 2), then `0007+` for later phases. Money is `integer` fils. Times are `timestamptz`.
+Files, in apply order: `db/migrations/0001_schema.sql` and `0005_reference_data.sql` (Phase 1), then `0006_functions*.sql` (Phase 2), then `0007+` for later phases. There is no 0002, 0003 or 0004.
 
 ### 4.1 Enums
 
@@ -120,7 +119,8 @@ create type payment_outcome as enum ('success','failed');
 
 | Table | Columns (all `not null` unless marked) |
 | --- | --- |
-| `profiles` | `id uuid pk default gen_random_uuid()`, `auth_user_id uuid unique null` (references `auth.users` on delete set null), `full_name text`, `gender gender`, `verified boolean default false`, `is_demo boolean default false`, `is_seed boolean default false`, `created_at timestamptz default now()` |
+| `profiles` | `id uuid pk default gen_random_uuid()`, `full_name text`, `gender gender`, `verified boolean default false`, `is_demo boolean default false`, `is_seed boolean default false`, `created_at timestamptz default now()` |
+| `sessions` | `token uuid pk default gen_random_uuid()`, `profile_id uuid fk`, `created_at timestamptz default now()`, `last_seen_at timestamptz default now()` |
 | `campuses` | `id text pk` (`just`, `yarmouk`, `inu`), `code text`, `name text`, `label text`, `lat double precision`, `lng double precision` |
 | `pickup_areas` | `id text pk`, `name text`, `detail text`, `lat`, `lng` |
 | `captains` | `id text pk`, `full_name text`, `phone_masked text`, `licensed boolean`, `license_expires_on date`, `active boolean` |
@@ -279,33 +279,25 @@ The booking becomes `cancelled` with `cancelled_by = 'rider'`. Other riders' far
 
 ---
 
-## 6. Authentication
+## 6. Authentication (demo only)
 
-### 6.1 Real flow (P1)
+1. `GET /api/config` returns `{demoLoginEnabled: boolean}`. The login and register screens show **Continue as demo student** only when it is true.
+2. The button opens a sheet with two personas: **Salma (female)** and **Omar (male)**.
+3. The client calls `POST /api/demo/claim {gender, fullName}` with `gender` of `female` or `male` and `fullName` set to the persona name. The server inserts a `profiles` row (`verified = true`, `is_demo = true`) and a `demo_settings` row and a `sessions` row, then returns `{token, profile}`. Each tap creates a new profile, so judges never share bookings.
+4. The client stores `token` in AsyncStorage under `juni.session` and sends it as `Authorization: Bearer <token>` on every call.
+5. `POST /api/me` returns `{profileId, fullName, gender, verified, isDemo}`, or 401 `NO_SESSION`.
+6. `POST /api/signout` deletes the session row.
+7. The banner shows "Demo mode · simulated verification".
 
-The existing `src/features/registration.tsx` and `access.tsx` flows stay as they are. Migration `0004_auth_sync.sql` adds a trigger on `auth.users` (after insert or update):
-- It upserts `profiles` by `auth_user_id`, setting `full_name` from `raw_user_meta_data->>'full_name'` (default `Student`).
-- It sets `gender` from `raw_user_meta_data->>'gender'`, only while `profiles.gender` is null.
-- It sets `verified = true` once `phone_confirmed_at` and `email_confirmed_at` are set and the email domain is in the allowed list. The trigger body hard-codes the domain list to match `EXPO_PUBLIC_JUNI_STUDENT_EMAIL_DOMAINS`.
+**App guard:** `src/features/authSession.tsx` is rewritten so `canEnter` = a stored token exists and `me()` returns `verified = true`. Remove the Supabase client, `isVerifiedStudent`, the `__DEV__` demo state and every `@supabase/supabase-js` import. Remove the `@supabase/supabase-js`, `react-native-url-polyfill` and `@react-native-async-storage/async-storage` dependencies only if nothing else imports them (AsyncStorage is still used for the token).
 
-### 6.2 Demo login (P0)
-
-1. A human enables **Anonymous sign-ins** in Supabase Auth (§11.1).
-2. The login and register screens show "Continue as demo student" when `EXPO_PUBLIC_DEMO_LOGIN_ENABLED === 'true'`. It opens a sheet with two personas: **Salma (female)** and **Omar (male)**.
-3. The client calls `supabase.auth.signInAnonymously()`, then `rpc_demo_claim_persona(p_gender, p_full_name)`. That creates the caller's profile with `verified = true`, `is_demo = true` and a `demo_settings` row. The RPC raises `DEMO_ONLY` unless `auth.users.is_anonymous` is true for the caller, so a real account can never be promoted this way. The §6.1 trigger also fires for anonymous users and creates an unverified profile first. The RPC updates that row.
-4. Each anonymous user is its own rider, so judges never share bookings.
-5. The banner shows "Demo mode · simulated verification".
-6. Sign-out calls `supabase.auth.signOut()`.
-
-### 6.3 App guard
-
-`src/features/authSession.tsx` changes so that `canEnter` = a session exists **and** `rpc_me()` returns `verified = true`. `rpc_me()` returns `{profile_id, full_name, gender, verified, is_demo}` or null. Remove `demoAvailable`, `enterDemo` and the client-only demo state.
+**Existing screens:** `registration.tsx` and `access.tsx` keep their layout. Their real OTP forms are hidden. "Create account" and the phone login show nothing but the demo button. `AUTH_SETUP.md` describes the old Supabase flow, so add a line at its top: "Not used by the Replit build. See docs/replit-handoff.md §6."
 
 ---
 
 ## 7. Seed data
 
-`scripts/seed.mjs` runs `supabase/seed.sql`. It is idempotent: it truncates seed-owned rows (`is_seed` profiles and every group and booking that references them) and re-inserts them. Generated group dates are relative to `now()` in `Asia/Amman`. `rpc_demo_reset()` calls the same SQL for the caller's own data plus the seed.
+`scripts/seed.mjs` runs `db/seed.sql`. It is idempotent: it truncates seed-owned rows (`is_seed` profiles and every group and booking that references them) and re-inserts them. Generated group dates are relative to `now()` in `Asia/Amman`. `POST /api/demo/reset` calls the same SQL for the caller's own data plus the seed.
 
 ### 7.1 Campuses
 
@@ -370,7 +362,7 @@ Seed riders get a `ride_requests` row with `class_start_at = arrival_target + 10
 
 ### 8.1 Access
 
-Route `src/app/(tabs)/demo.tsx`, hidden from the tab bar (`href: null`). Opened by a "Demo controls" row on the Profile screen, shown only when `rpc_me().is_demo`. Every `rpc_demo_*` raises `DEMO_ONLY` unless the caller is a demo user.
+Route `src/app/(tabs)/demo.tsx`, hidden from the tab bar (`href: null`). Opened by a "Demo controls" row on the Profile screen, shown only when `me().isDemo`. Every `/api/demo/*` endpoint returns `DEMO_ONLY` unless the caller's profile has `is_demo = true`.
 
 ### 8.2 Clock
 
@@ -383,17 +375,17 @@ Only demo users have `demo_settings` rows, so real users always get `now()`.
 
 ### 8.3 Controls
 
-| Control | RPC | Shows |
+| Control | Endpoint | Shows |
 | --- | --- | --- |
-| Confirm captain on my group | `rpc_demo_confirm_captain(booking_id)`: assign the first eligible captain if none, then confirm | T08 → T10 |
-| Try unlicensed captain | `rpc_demo_assign_captain(booking_id, 'cap-6')` | T04, `CAPTAIN_INELIGIBLE` |
-| Expire my hold | `rpc_demo_expire_hold(hold_id)` sets `expires_at = app_now − 1 s` | X1 |
-| Fail next payment | `rpc_demo_set(force_payment_failure => true)` | Failed payment, hold released |
-| Race last seat | The panel lists groups with exactly one seat left that the caller may join. On tap it sends two requests at once with `Promise.all`: `rpc_start_checkout` as the caller, and `rpc_demo_seed_checkout(group_id)`, which runs `core.start_checkout` for a seed rider who fits the group's preference and has no seat in it. Both use the group's first stop as pickup. They are separate HTTP requests, so they run as separate transactions and race on the row lock. The panel shows both outcomes side by side, then releases whichever hold won. | T12, one success and one `GROUP_FULL` |
-| Clock +N hours | `rpc_demo_set(clock_offset_minutes)` with presets +0, +11 h, +12 h, +13 h before my pickup (computed relative to the booking's `pickup_at`) | T05, T06, T11 |
-| Travel data outage | `rpc_demo_set(force_travel_outage)` toggle | T09 |
-| Start trip / complete trip | `rpc_demo_start_trip`, `rpc_demo_complete_trip` | Tracking and history |
-| Reset demo | `rpc_demo_reset()` | Rerun |
+| Confirm captain on my group | `POST /api/demo/confirm-captain {bookingId}`: assign the first eligible captain if none, then confirm | T08 → T10 |
+| Try unlicensed captain | `POST /api/demo/assign-captain {bookingId, captainId:'cap-6'}` | T04, `CAPTAIN_INELIGIBLE` |
+| Expire my hold | `POST /api/demo/expire-hold {holdId}` sets `expires_at = app_now − 1 s` | X1 |
+| Fail next payment | `POST /api/demo/set {forcePaymentFailure:true}` | Failed payment, hold released |
+| Race last seat | The panel lists groups with exactly one seat left that the caller may join. On tap it sends two requests at once with `Promise.all`: `POST /api/start-checkout` as the caller, and `POST /api/demo/seed-checkout {groupId}`, which runs `core.start_checkout` for a seed rider who fits the group's preference and has no seat in it. Both use the group's first stop as pickup. They are separate HTTP requests on separate pool connections, so they run as separate transactions and race on the row lock (`select ... for update`). The panel shows both outcomes side by side, then releases whichever hold won. | T12, one success and one `GROUP_FULL` |
+| Clock +N hours | `POST /api/demo/set {clockOffsetMinutes}` with presets +0, +11 h, +12 h, +13 h before my pickup (computed relative to the booking's `pickup_at`) | T05, T06, T11 |
+| Travel data outage | `POST /api/demo/set {forceTravelOutage}` toggle | T09 |
+| Start trip / complete trip | `POST /api/demo/start-trip {bookingId}`, `POST /api/demo/complete-trip {bookingId}` | Tracking and history |
+| Reset demo | `POST /api/demo/reset` | Rerun |
 
 ---
 
@@ -401,7 +393,25 @@ Only demo users have `demo_settings` rows, so real users always get `now()`.
 
 ### 9.1 Data layer
 
-Create `src/data/api.ts` with one typed function per `rpc_*` (`me`, `recommendDeparture`, `createRequest`, `searchGroups`, `createGroup`, `startCheckout`, `pay`, `myBookings`, `booking`, `cancelBooking`, `logSos` and the demo functions). Every function returns `{ok: true, data} | {ok: false, code, message}`. Generate idempotency keys with `crypto.randomUUID()`, kept in component state per action so a retry reuses the key. Format money and time in `src/data/format.ts` (`formatFils`, `formatTime`, `formatDate` in `Asia/Amman`).
+Create `src/data/api.ts` with one typed function per endpoint below, each calling `POST /api/<path>` through a single `call(path, body)` helper. Every function returns `{ok: true, data} | {ok: false, code, message}`. The helper adds the bearer token and, on 401, clears the stored token and routes to `/login`. Generate idempotency keys with `crypto.randomUUID()`, kept in component state per action so a retry reuses the key. Format money and time in `src/data/format.ts` (`formatFils`, `formatTime`, `formatDate` in `Asia/Amman`).
+
+| Function | Endpoint | Core function |
+| --- | --- | --- |
+| `config` | `GET /api/config` | none |
+| `claimPersona` | `/api/demo/claim` | inserts profile, settings, session |
+| `me`, `signOut` | `/api/me`, `/api/signout` | none |
+| `pickupAreas`, `campuses` | `/api/pickup-areas`, `/api/campuses` | plain selects |
+| `createRequest` | `/api/create-request` | `core.create_request` |
+| `recommendDeparture` | `/api/recommend-departure` | `core.recommend_departure` |
+| `searchGroups` | `/api/search-groups` | `core.search_groups` |
+| `groupDetail` | `/api/group-detail` | `core.group_detail` |
+| `createGroup` | `/api/create-group` | `core.create_group` |
+| `startCheckout` | `/api/start-checkout` | `core.start_checkout` |
+| `pay` | `/api/pay` | `core.pay` |
+| `myBookings`, `booking` | `/api/my-bookings`, `/api/booking` | `core.my_bookings`, `core.booking_detail` |
+| `cancelBooking` | `/api/cancel-booking` | `core.cancel_booking` |
+| `logSos` | `/api/log-sos` | `core.log_sos` |
+| demo functions | `/api/demo/*` (§8.3) | `core.*` plus `demo_settings` updates |
 
 **Route params** carry IDs, never computed values: `requestId`, `groupId`, `routeVersion`, `holdId`, `bookingId`. Screens re-fetch by ID.
 
@@ -410,7 +420,7 @@ Create `src/data/api.ts` with one typed function per `rpc_*` (`me`, `recommendDe
 | Route | File | Change | Fabricated values to remove |
 | --- | --- | --- | --- |
 | `/login`, `/register` | `access.tsx`, `registration.tsx` | Add demo persona sheet (§6.2). Replace `DemoAccess`. | none |
-| `/home` | `dashboard.tsx` `HomeScreen` | Next booking from `myBookings`. Name from `rpc_me`. | sample ride card values |
+| `/home` | `dashboard.tsx` `HomeScreen` | Next booking from `myBookings`. Name from `me`. | sample ride card values |
 | `/plan` | `planning.tsx` `PlanRide` | Pickup dropdown (BottomSheet, §7.2 list). Remove the hard-coded "Student Area, Irbid". Validation uses "pickup ≥ 60 min from now" from the server response instead of the 40-minute client check. Submit calls `createRequest` then `recommendDeparture`. | "Student Area, Irbid", "Al-Husn Road · current location" |
 | `/suggestion` | `planning.tsx` `Suggestion` | Shows departure, travel minutes and arrival from `recommendDeparture`. Badge "Recommended". Facts: "Arrives N min before class", "Includes peak-hour traffic factor" when applicable. Fallback banner when `travel_source = 'fallback'`. | "AI RECOMMENDATION", "32 min", "92%", "8-minute safety buffer", "This is an AI estimate" |
 | `/matching` | `planning.tsx` `Matching` | Filter chips default to the rider's gender (female → Girls-only, male → Boys-only). List from `searchGroups`. Empty state shows the reason copy (§9.3) plus "Start a new group", "Change class time", "Change pickup". Remove the debug toggle `IconButton`. | "3 matches", "AI ranked", "94% route match", "92% chance", fixed seat dots, the `Boys-only` → empty hack |
@@ -454,7 +464,7 @@ Create `src/data/api.ts` with one typed function per `rpc_*` (`me`, `recommendDe
 
 ## 10. Tests
 
-Runner: `node --test tests/` using the `pg` package and `SUPABASE_DB_URL`. Each test file opens its own client and wraps its fixture in a transaction that is rolled back. T12 and X3 instead commit fixtures in a unique `campus_id`-scoped group and delete them afterwards. They use **two separate connections**. Tests call `core_*` with an explicit `p_now`.
+Runner: `node --test tests/` using the `pg` package and `DATABASE_URL`. Each test file opens its own client and wraps its fixture in a transaction that is rolled back. T12 and X3 instead commit fixtures in a unique `campus_id`-scoped group and delete them afterwards. They use **two separate connections**. Tests call `core_*` with an explicit `p_now`.
 
 | ID | Function | Fixture | Expect |
 | --- | --- | --- | --- |
@@ -476,37 +486,42 @@ Runner: `node --test tests/` using the `pg` package and `SUPABASE_DB_URL`. Each 
 | X4 | fares | §5.3 worked example | 1017, 1322, 1625, 2036, Σ = 6000 |
 | X5 | `core_enforce_deadline` | 2/4 group, collected 2800, `p_now = first_pickup − 2 h` | cancelled `below_floor`, two full refunds |
 | X6 | `core_cancel_booking` | full-refund cancel on an `awaiting_captain` group | group back to `open`, captain unassigned |
+| X7 | HTTP `POST /api/me`, `/api/start-checkout` | no `Authorization` header, then a bogus token | 401 `NO_SESSION` both times |
 
 ---
 
 ## 11. Replit setup and deploy
 
-### 11.1 Human-only steps (do before Phase 1)
+### 11.1 Human-only steps (before Phase 0)
 
-1. Create a hosted Supabase project in the region nearest Jordan (`eu-central-1`, Frankfurt).
-2. **Authentication → Sign In / Providers:** enable **Anonymous sign-ins**. Keep Email enabled. Phone is P1 and needs an SMS provider (Twilio) able to reach `+962` numbers. Skip Phone for P0.
-3. **Authentication → URL configuration:** set Site URL to the Replit deployment URL. Add it and the Replit dev URL to redirect URLs.
-4. **Project Settings → Database → Connection string → Session pooler (port 5432)** → copy into the Replit secret `SUPABASE_DB_URL`. **Project Settings → API** → copy the URL and the publishable key into the secrets from §3.
-5. In Replit, import the GitHub repo and open the Agent with [Phase 0](replit-prompts/phase-0-setup.md).
+1. In the Replit workspace, open **Tools → Database (PostgreSQL)** and create the database. Replit then sets `DATABASE_URL` and the `PG*` variables automatically.
+2. Add the secret `JUNI_DEMO_LOGIN_ENABLED` with the value `true`.
+3. Replit keeps a **development** database and a separate **production** database for deployments. The production database starts empty, so the deploy run command applies migrations and seeds it (§11.3). Check Replit's current database docs for how the production connection is exposed to a deployment.
+4. Import the GitHub repo `Salma-ja/juni` (if not already imported) and open the Agent with [Phase 0](replit-prompts/phase-0-setup.md).
 
-### 11.2 Scripts to add to `package.json`
+### 11.2 Scripts and server
+
+Add these scripts to `package.json`:
 
 ```json
 "build:web": "expo export --platform web --output-dir dist",
-"serve": "node scripts/serve.mjs",
+"serve": "node server/index.mjs",
 "db:migrate": "node scripts/migrate.mjs",
 "db:seed": "node scripts/seed.mjs",
+"db:seed-if-empty": "node scripts/seed.mjs --if-empty",
+"start:prod": "npm run db:migrate && npm run db:seed-if-empty && npm run serve",
 "test": "node --test tests/"
 ```
 
-Add `pg` as a dev dependency.
+Add `express` (4.x) and `pg` (8.x) as dependencies.
 
-- **`scripts/serve.mjs`:** a dependency-free Node `http` server on `process.env.PORT || 3000` and host `0.0.0.0`. It serves `dist/` with correct content types, and serves `dist/index.html` for any path without a file extension (SPA fallback).
-- **`scripts/migrate.mjs`:** applies `supabase/migrations/*.sql` in name order, each in a transaction, recorded in `schema_migrations`.
+- **`server/index.mjs`:** Express on `0.0.0.0:$PORT` (default 3000). A `pg` `Pool` (max 10) from `DATABASE_URL`. Mounts JSON body parsing, the `/api` routes from §9.1, then serves `dist/` statically and returns `dist/index.html` for any GET without a file extension that does not start with `/api`. Server code is split into `server/db.mjs` (pool and `withTx`), `server/auth.mjs` (session lookup), `server/routes.mjs` (one handler per endpoint) and `server/errors.mjs` (error mapping).
+- **`scripts/migrate.mjs`:** applies `db/migrations/*.sql` in name order, each in a transaction, recorded in `schema_migrations`.
+- **`scripts/seed.mjs`:** runs `db/seed.sql`. With `--if-empty` it does nothing when `campuses` already has rows.
 
 ### 11.3 Replit deployment
 
-Deployment type **Autoscale**. Build command `npm ci && npm run build:web`. Run command `npm run serve`. Secrets from §3 are available at build. Development preview uses the same two commands.
+Deployment type **Autoscale**. Build command `npm ci && npm run build:web`. Run command `npm run start:prod`. The deployment must be attached to the production database from §11.1.
 
 ---
 
@@ -528,8 +543,8 @@ Deployment type **Autoscale**. Build command `npm ci && npm run build:web`. Run 
 
 ## 13. Out of scope
 
-Weekly plans, favorites, hotspots, return trips, late-night rides, live routing API, live GPS, real emergency dispatch, live Jeeny payments or dispatch, captain app, JUNI Points, Arabic and RTL, school service, notifications.
+Real phone and university-email OTP, Supabase, weekly plans, favorites, hotspots, return trips, late-night rides, live routing API, live GPS, real emergency dispatch, live Jeeny payments or dispatch, captain app, JUNI Points, Arabic and RTL, school service, notifications.
 
 ## 14. Open for a real pilot (not blocking)
 
-Real fare constants, payout floor and dispatch buffer. Treatment of staff-shared email domains (JUST, INU). Funding of below-floor and platform-cancelled refunds. The routing provider and its terms.
+Real fare constants, payout floor and dispatch buffer. Treatment of staff-shared email domains (JUST, INU). Funding of below-floor and platform-cancelled refunds. The routing provider and its terms. Real phone and email verification (an SMS provider for +962 numbers).

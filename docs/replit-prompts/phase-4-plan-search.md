@@ -10,9 +10,12 @@ Goal: the rider plans a real request and sees real, ranked groups with real
 fares, or a real empty state.
 
 Do:
-1. Add api functions: pickupAreas, createRequest, recommendDeparture,
-   searchGroups, createGroup, groupDetail (a group_detail rpc if Phase 2
-   did not add one: members' first names, stops, seats, fare quote for the
+1. Add the endpoints /api/create-request, /api/recommend-departure,
+   /api/search-groups, /api/create-group and /api/group-detail to
+   server/routes.mjs (one handler each, calling the core.* function of the
+   same name per §3 and §9.1), then the matching src/data/api.ts functions:
+   pickupAreas, createRequest, recommendDeparture, searchGroups, createGroup,
+   groupDetail ( members' first names, stops, seats, fare quote for the
    rider's pickup, cap, route_version).
 2. PlanRide: add a pickup row above the date row using InfoRow + BottomSheet
    listing the 8 pickup areas from pickupAreas(). Remove "Student Area,
@@ -52,5 +55,5 @@ Exit checks:
 - As Omar with filter Girls-only → "No groups match that preference at this
   time."
 
-Stop and ask if: any screen needs a value no rpc returns.
+Stop and ask if: any screen needs a value no endpoint returns.
 ```

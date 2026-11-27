@@ -3,27 +3,27 @@
 ```text
 Phase 0 of docs/replit-prompts. Follow replit.md.
 
-Read: docs/replit-handoff.md §3 (Secrets) and §11.
+Read: docs/replit-handoff.md §3 and §11.
 
-Goal: the existing app builds and is served from Replit with the scripts the
-later phases need. No feature changes.
+Goal: the existing app builds and is served by an Express server on Replit,
+connected to PostgreSQL. No feature changes.
 
 Do:
-1. Confirm these Replit secrets exist (names only, never print values):
-   EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-   EXPO_PUBLIC_JUNI_STUDENT_EMAIL_DOMAINS, EXPO_PUBLIC_DEMO_LOGIN_ENABLED,
-   SUPABASE_DB_URL. If any is missing, stop and tell me which.
-2. Add the five package.json scripts from §11.2 exactly. Add "pg" (latest 8.x)
-   to devDependencies.
-3. Create scripts/serve.mjs as specified in §11.2: Node built-ins only,
-   0.0.0.0, PORT env with 3000 default, serves dist/, SPA fallback to
-   dist/index.html for extensionless paths, correct Content-Type for
-   .html .js .css .json .png .jpg .svg .ttf .woff .woff2 .ico, and 404 for
-   missing files with an extension.
-4. Create scripts/db-check.mjs that connects with SUPABASE_DB_URL and prints
+1. Confirm DATABASE_URL and JUNI_DEMO_LOGIN_ENABLED exist (names only, never
+   print values). If either is missing, stop and tell me which.
+2. Add the scripts from §11.2 to package.json exactly. Add "express" (4.x) and
+   "pg" (8.x) to dependencies.
+3. Create server/index.mjs, server/db.mjs, server/auth.mjs, server/routes.mjs
+   and server/errors.mjs per §11.2. For now routes.mjs has only:
+   GET /api/health → {ok:true, db:true} after running "select 1", and
+   GET /api/config → {demoLoginEnabled: process.env.JUNI_DEMO_LOGIN_ENABLED === 'true'}.
+   The server serves dist/ with the SPA fallback described in §11.2 and never
+   falls back for paths starting with /api (those return 404 JSON).
+4. Create scripts/db-check.mjs: connects with DATABASE_URL and prints
    "db ok <server_version>".
 5. Add dist/ to .gitignore.
-6. Configure the Replit run button and the Autoscale deployment per §11.3.
+6. Configure the Replit run button to "npm run build:web && npm run serve" and
+   the Autoscale deployment per §11.3.
 
 Do not: touch src/, add migrations, or change app.json.
 
@@ -32,7 +32,11 @@ Exit checks (run and paste output):
 - npm run typecheck            → exits 0
 - node scripts/db-check.mjs    → "db ok ..."
 - npm run build:web            → dist/index.html exists
-- npm run serve, then curl -s -o /dev/null -w "%{http_code}" localhost:3000/plan → 200
+- npm run serve, then:
+    curl -s localhost:3000/api/health          → {"ok":true,"db":true}
+    curl -s localhost:3000/api/config          → {"demoLoginEnabled":true}
+    curl -s -o /dev/null -w "%{http_code}" localhost:3000/plan      → 200
+    curl -s -o /dev/null -w "%{http_code}" localhost:3000/api/nope  → 404
 - The Replit preview shows the JUNI splash and login screen.
 
 Stop and ask if: the database connection fails, or the build fails.

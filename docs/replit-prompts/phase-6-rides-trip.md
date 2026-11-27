@@ -10,7 +10,9 @@ Goal: every remaining screen reads real bookings, and cancellation applies
 the 12-hour rule on the server.
 
 Do (P0 first):
-1. [P0] Add api functions myBookings, cancelBooking and logSos.
+1. [P0] Add the endpoints /api/my-bookings, /api/cancel-booking and
+   /api/log-sos to server/routes.mjs (§3, §9.1) and the api functions
+   myBookings, cancelBooking and logSos.
    myBookings returns upcoming (seat_booked, awaiting_captain, confirmed),
    active (in_progress) and past (completed, cancelled with refund info).
 2. [P0] MyRides: tabs from real data, with an empty state per tab ("No
