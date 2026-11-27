@@ -10,7 +10,9 @@ Goal: a real seat hold, a simulated payment that creates a real booking, and
 a status screen that shows the real state, including "awaiting captain".
 
 Do:
-1. Add api functions startCheckout, pay and booking. Keep one idempotency key
+1. Add the endpoints /api/start-checkout, /api/pay and /api/booking to
+   server/routes.mjs (§3, §9.1) and the api functions startCheckout, pay and
+   booking. Keep one idempotency key
    per screen mount in useRef(crypto.randomUUID()), so a retry or double tap
    reuses it.
 2. BookingSummary: on mount call startCheckout({groupId, pickupAreaId,

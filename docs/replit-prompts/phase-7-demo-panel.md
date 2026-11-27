@@ -9,13 +9,12 @@ T09, T11, T12, X1).
 Goal: judges can trigger every edge case from the app without SQL.
 
 Do:
-1. Migration with every rpc_demo_* in §8.3: rpc_demo_confirm_captain,
-   rpc_demo_assign_captain, rpc_demo_expire_hold, rpc_demo_set,
-   rpc_demo_seed_checkout, rpc_demo_start_trip, rpc_demo_complete_trip,
-   rpc_demo_reset. Each raises DEMO_ONLY unless the caller's profile.is_demo.
-   They act only on the caller's own bookings and holds, except
-   rpc_demo_seed_checkout (seed riders) and rpc_demo_reset (the caller's data
-   plus the seed).
+1. server/routes.mjs: every /api/demo/* endpoint in §8.3 (confirm-captain,
+   assign-captain, expire-hold, set, seed-checkout, start-trip, complete-trip,
+   reset), each returning DEMO_ONLY unless the caller's profile.is_demo. Add
+   any new core.* functions they need in a new migration numbered after the
+   last one. Each acts only on the caller's own bookings and holds, except
+   seed-checkout (seed riders) and reset (the caller's data plus the seed).
 2. src/app/(tabs)/demo.tsx, hidden from the tab bar (href: null in
    (tabs)/_layout.tsx), using the existing Page, Header, Card and Button
    components. Sections:
