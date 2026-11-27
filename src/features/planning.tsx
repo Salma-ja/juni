@@ -298,7 +298,7 @@ export function Suggestion() {
       </Card>
       <Pile gap={7} style={styles.facts}>
         <Fact icon={Clock3} text={`Arrives ${data.minutes_before_class} min before class`} />
-        {data.peak_factor > 1 && <Fact icon={TrendingUp} text="Includes peak-hour traffic factor" />}
+        {!fallback && data.peak_factor > 1 && <Fact icon={TrendingUp} text="Includes peak-hour traffic factor" />}
         {data.alternative && <Fact icon={Route} text={`Another group leaves at ${formatTime(data.alternative.departure_at)}`} />}
       </Pile>
       {fallback && <Notice icon={Info} tint="#735C23">Estimate. Live travel data unavailable.</Notice>}

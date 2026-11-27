@@ -564,3 +564,8 @@ Real fare constants, payout floor and dispatch buffer. Treatment of staff-shared
 | N7 | **Expiry date.** Seeded captain licences expire in 2027, so a captain is ineligible after that date and tests use 2027-02 dates. |
 | N8 | **Tests** run with `node --test "tests/**/*.test.mjs"` because `node --test tests/` fails on Node 24. Tests are T01-T12, X1-X6 plus extra coverage. |
 | N9 | **Local run.** `.env` (git-ignored) holds `DATABASE_URL` and `JUNI_DEMO_LOGIN_ENABLED`; `server/env.mjs` loads it when present. Replit-only steps (run button, Autoscale, deploy) are skipped. |
+| N10 | **Extra endpoints.** `POST /api/hold` (plain read of the caller's own hold, so the payment screen survives a reload), `POST /api/demo/settings`, `/api/demo/release-hold` and `/api/demo/last-seat-groups` (panel reads and the race clean-up). Demo helpers live in migration `0007`, with `core.demo_*`, `core.seed_checkout` and `core.last_seat_groups`. |
+| N11 | **Demo reset scope (migration `0008`).** `demo_reset_user` deletes only the caller's bookings, holds and requests; a group the caller created is deleted only if nobody else booked it. The global seed re-run in `/api/demo/reset` (§7) still removes bookings that other demo users hold in seeded groups. Acceptable for one judge at a time; revisit before parallel judging. |
+| N12 | **tsconfig** excludes `dist`, `server`, `scripts`, `tests` and `db`: `tsc` ran out of stack on the exported web bundle once `dist/` existed. |
+| N13 | **TOO_SOON in checkout** is unreachable for existing groups (the deadline in §5.6 fires at departure - 2 h, earlier than the 60-minute check). It is enforced in `create_request` and `create_group`, where it can fire. |
+
