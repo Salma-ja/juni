@@ -10,6 +10,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line } from 'react-native-svg';
 import { color, font, radius, shadow, spacing, type Weight } from '@/theme';
+import { formatOffset, useClockOffset } from '@/data/clock';
 
 type CopyProps = TextProps & { size?: number; weight?: Weight; tint?: string };
 export function Copy({ size = 12, weight = 400, tint = color.ink, style, ...props }: CopyProps) {
@@ -40,6 +41,7 @@ export function Page({ children, style, mode = 'page' }: {
   const fade = useRef(new Animated.Value(0)).current;
   const { height } = useWindowDimensions();
   const { bottom } = useSafeAreaInsets();
+  const clock = useClockOffset();
   useEffect(() => {
     const animation = Animated.timing(fade, { toValue: 1, duration: 320, useNativeDriver: Platform.OS !== 'web' });
     animation.start();
@@ -64,6 +66,11 @@ export function Page({ children, style, mode = 'page' }: {
           {children}
         </Animated.View>
       </ScrollView>
+      {clock !== 0 && (
+        <View pointerEvents="none" accessibilityLabel={`Demo clock ${formatOffset(clock)}`} style={styles.demoPill}>
+          <Copy size={9} weight={800} tint={color.white}>{`DEMO ${formatOffset(clock)}`}</Copy>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -360,6 +367,7 @@ export const fill: ViewStyle = { flex: 1 };
 export const spread: ViewStyle = { justifyContent: 'space-between' };
 
 const styles = StyleSheet.create({
+  demoPill: { position: 'absolute', top: 10, right: 14, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: '#7157D2', zIndex: 10 },
   safe: { flex: 1, backgroundColor: color.white },
   scroll: { flexGrow: 1 },
   page: { flexGrow: 1, paddingTop: 18, paddingHorizontal: spacing.page, paddingBottom: 38, backgroundColor: color.white },

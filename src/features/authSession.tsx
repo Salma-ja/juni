@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as api from '@/data/api';
 import type { Me } from '@/data/api';
+import { setClockOffset } from '@/data/clock';
 
 type AuthState = {
   profile: Me | null;
@@ -32,6 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       api.setUnauthorizedHandler(null);
     };
   }, []);
+
+  useEffect(() => {
+    if (!profile?.isDemo) { setClockOffset(0); return; }
+    api.demoSettings().then((res) => { if (res.ok) setClockOffset(res.data.clockOffsetMinutes); });
+  }, [profile]);
 
   const signInWithToken = useCallback(async (token: string, next: Me) => {
     await api.setToken(token);

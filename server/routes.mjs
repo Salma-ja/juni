@@ -1,7 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import { pool, withTx } from './db.mjs';
 import { ApiError, toResponse } from './errors.mjs';
 import { requireSession } from './auth.mjs';
+import { ROOT } from './env.mjs';
 
 /** Wrap an async handler so thrown errors become the JSON error shape. */
 export const handler = (fn) => async (req, res) => {
@@ -152,6 +155,62 @@ export function buildRouter() {
   endpoint(r, 'log-sos', ({ client, profile, body, now }) =>
     callCore(client, 'select core.log_sos($1::uuid,$2::uuid,$3::timestamptz) as r',
       [profile.id, uuid(body.bookingId, 'bookingId'), now]));
+
+  // ---- Phase 7: demo control panel (§8). Every endpoint answers DEMO_ONLY unless the caller is a demo profile. ----
+  const demo = (name, fn) => endpoint(r, `demo/${name}`, fn, { demoOnly: true });
+  const bookingArg = (body) => uuid(body.bookingId, 'bookingId');
+
+  const settings = async (client, profile) => {
+    const row = (await client.query(
+      `select clock_offset_minutes, force_travel_outage, force_payment_failure, now() as real_now,
+              core.app_now($1::uuid) as app_now from demo_settings where profile_id = $1`, [profile.id])).rows[0];
+    const hold = (await client.query(
+      `select id from seat_holds where rider_id = $1 and released_at is null and expires_at > $2
+        order by created_at desc limit 1`, [profile.id, row.app_now])).rows[0];
+    return {
+      clockOffsetMinutes: row.clock_offset_minutes, forceTravelOutage: row.force_travel_outage,
+      forcePaymentFailure: row.force_payment_failure, realNow: row.real_now, appNow: row.app_now,
+      activeHoldId: hold?.id ?? null,
+    };
+  };
+  demo('settings', ({ client, profile }) => settings(client, profile));
+  demo('set', async ({ client, profile, body }) => {
+    if (body.clockOffsetMinutes !== undefined) {
+      if (!Number.isInteger(body.clockOffsetMinutes) || Math.abs(body.clockOffsetMinutes) > 60 * 24 * 30) {
+        throw new ApiError('INVALID_INPUT', 'clockOffsetMinutes is invalid');
+      }
+      await client.query('update demo_settings set clock_offset_minutes = $2 where profile_id = $1', [profile.id, body.clockOffsetMinutes]);
+    }
+    for (const [key, col] of [['forceTravelOutage', 'force_travel_outage'], ['forcePaymentFailure', 'force_payment_failure']]) {
+      if (body[key] !== undefined) {
+        if (typeof body[key] !== 'boolean') throw new ApiError('INVALID_INPUT', `${key} must be boolean`);
+        await client.query(`update demo_settings set ${col} = $2 where profile_id = $1`, [profile.id, body[key]]);
+      }
+    }
+    return settings(client, profile);
+  });
+  demo('confirm-captain', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.demo_confirm_captain($1::uuid,$2::uuid,$3::timestamptz) as r', [profile.id, bookingArg(body), now]));
+  demo('assign-captain', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.demo_assign_captain($1::uuid,$2::uuid,$3,$4::timestamptz) as r',
+      [profile.id, bookingArg(body), s(body.captainId, 'captainId'), now]));
+  demo('expire-hold', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.demo_expire_hold($1::uuid,$2::uuid,$3::timestamptz) as r', [profile.id, uuid(body.holdId, 'holdId'), now]));
+  demo('release-hold', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.demo_release_hold($1::uuid,$2::uuid,$3::timestamptz) as r', [profile.id, uuid(body.holdId, 'holdId'), now]));
+  demo('start-trip', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.demo_start_trip($1::uuid,$2::uuid,$3::timestamptz) as r', [profile.id, bookingArg(body), now]));
+  demo('complete-trip', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.demo_complete_trip($1::uuid,$2::uuid,$3::timestamptz) as r', [profile.id, bookingArg(body), now]));
+  demo('last-seat-groups', ({ client, profile, now }) =>
+    callCore(client, 'select core.last_seat_groups($1::uuid,$2::timestamptz) as r', [profile.id, now]));
+  demo('seed-checkout', ({ client, body, now }) =>
+    callCore(client, 'select core.seed_checkout($1::uuid,$2::timestamptz) as r', [uuid(body.groupId, 'groupId'), now]));
+  demo('reset', async ({ client, profile }) => {
+    await client.query('select core.demo_reset_user($1::uuid)', [profile.id]);
+    await client.query(fs.readFileSync(path.join(ROOT, 'db', 'seed.sql'), 'utf8'));
+    return { reset: true };
+  });
 
   return r;
 }

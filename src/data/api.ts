@@ -149,3 +149,25 @@ export type CancelResult = { booking_id: string; refund_fils: number; reason: st
 export const myBookings = () => call<MyBookings>('my-bookings');
 export const cancelBooking = (bookingId: string) => call<CancelResult>('cancel-booking', { bookingId });
 export const logSos = (bookingId: string) => call<{ code: string; created_at: string }>('log-sos', { bookingId });
+
+// ---------- demo controls (Phase 7) ----------
+export type DemoSettings = {
+  clockOffsetMinutes: number; forceTravelOutage: boolean; forcePaymentFailure: boolean; realNow: string; appNow: string;
+  activeHoldId: string | null;
+};
+export type LastSeatGroup = {
+  group_id: string; campus_id: string; campus_code: string; pref: Pref; departure_at: string; route_version: number;
+  pickup_area_id: string; pickup_name: string; seats_taken: number; capacity: number;
+};
+export const demoSettings = () => call<DemoSettings>('demo/settings');
+export const demoSet = (b: { clockOffsetMinutes?: number; forceTravelOutage?: boolean; forcePaymentFailure?: boolean }) =>
+  call<DemoSettings>('demo/set', b);
+export const demoConfirmCaptain = (bookingId: string) => call<unknown>('demo/confirm-captain', { bookingId });
+export const demoAssignCaptain = (bookingId: string, captainId: string) => call<unknown>('demo/assign-captain', { bookingId, captainId });
+export const demoExpireHold = (holdId: string) => call<unknown>('demo/expire-hold', { holdId });
+export const demoReleaseHold = (holdId: string) => call<unknown>('demo/release-hold', { holdId });
+export const demoStartTrip = (bookingId: string) => call<unknown>('demo/start-trip', { bookingId });
+export const demoCompleteTrip = (bookingId: string) => call<unknown>('demo/complete-trip', { bookingId });
+export const demoLastSeatGroups = () => call<LastSeatGroup[]>('demo/last-seat-groups');
+export const demoSeedCheckout = (groupId: string) => call<Checkout & { seed_rider: string }>('demo/seed-checkout', { groupId });
+export const demoReset = () => call<{ reset: boolean }>('demo/reset');

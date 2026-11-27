@@ -26,6 +26,7 @@ export default function TabLayout() {
       <Tabs.Screen name="(rides)" options={{ title: 'My Rides', tabBarIcon: tabIcon(Car) }} />
       <Tabs.Screen name="points" options={{ title: 'Points', tabBarIcon: tabIcon(Coins) }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: tabIcon(CircleUserRound) }} />
+      <Tabs.Screen name="demo" options={{ href: null }} />
     </Tabs>
   );
 }
