@@ -114,3 +114,4 @@ Follow [authentication setup](AUTH_SETUP.md) to run the verified ride flow. Use 
 | [Booking and operations](docs/booking-and-operations.md) | Seat lifecycle, checkout, cancellation, captain scheduling and reliability |
 | [Business model and pilot](docs/business-model-and-pilot.md) | Revenue, unit economics, pilot design, success metrics and expansion |
 | [Implementation and verification](docs/implementation-and-verification.md) | Current code map, proposed backend records and acceptance scenarios |
+| [Replit handoff](docs/replit-handoff.md) | Build source of truth: decisions, schema, rules, seed, tests and [phase prompts](docs/replit-prompts/README.md) |
