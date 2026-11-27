@@ -16,7 +16,8 @@ JUNI is an Expo Router (React Native, TypeScript) app for student ride sharing i
 5. Do not invent values. Every fare, seat count, name, captain, ID and time on screen comes from an RPC result.
 6. Keep the existing visual design and components in `src/components/ui.tsx` and `src/theme`. Change data, not styling, unless a phase says otherwise.
 7. Write migrations as new numbered files in `supabase/migrations/`. Never edit an applied migration. Add a new one.
-8. If something in the spec is impossible or contradictory, **stop and report it**. Do not pick a workaround silently.
+8. Do not use `JUNI_backend_starter.zip` or anything inside it. It is a separate draft whose schema conflicts with the spec.
+9. If something in the spec is impossible or contradictory, **stop and report it**. Do not pick a workaround silently.
 
 ## Commands
 
