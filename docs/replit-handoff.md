@@ -266,8 +266,8 @@ On success it inserts a `seat_holds` row (`expires_at = now + 5 min`) and return
 if group.status = 'in_progress' or later:  raise CANCEL_NOT_ALLOWED
 hours = extract(epoch from booking.pickup_at − now) / 3600
 if hours ≥ 12:  refund = fare_fils, reason rider_12h_plus
-                  if group is full or awaiting_captain → group back to 'open', unassign the unconfirmed captain
-                  if group is confirmed → stays confirmed, the seat stays empty (not resold)
+                  if group is full, awaiting_captain or confirmed → group back to 'open', captain unassigned and unconfirmed
+                  (decision 2026-11-27: a confirmed group also reopens so the seat can be re-booked, journey steps 6-7)
 else:           refund = 0,        reason rider_late_no_refund → seat stays counted as taken, group unchanged
 ```
 
@@ -548,3 +548,27 @@ Real phone and university-email OTP, Supabase, weekly plans, favorites, hotspots
 ## 14. Open for a real pilot (not blocking)
 
 Real fare constants, payout floor and dispatch buffer. Treatment of staff-shared email domains (JUST, INU). Funding of below-floor and platform-cancelled refunds. The routing provider and its terms. Real phone and email verification (an SMS provider for +962 numbers).
+
+---
+
+## 15. Build notes (decisions and deviations made while building locally)
+
+| # | Note |
+| --- | --- |
+| N1 | **Seed captains.** Auto-assign gives the lowest free captain id, so the seeded 08:50 groups (JUST, Yarmouk, INU) took cap-1, cap-2, cap-3 and Salma's 07:50 JUST group would have got cap-4. Decision: `db/seed.sql` reassigns the 08:50 groups to cap-4, cap-3 and cap-2 so cap-1 (Omar Khalil) is free for the 07:50 demo group (journey step 5). The core assignment rule is unchanged. |
+| N2 | **§5.7.** A ≥12 h cancel reopens a `confirmed` group too (see §5.7). Without it journey step 7 cannot re-book the same group. Migration `0006f`. |
+| N3 | **T01 vs §5.5 order.** A group full by payment is `awaiting_captain`, which would raise `GROUP_NOT_OPEN` before `GROUP_FULL`. `GROUP_NOT_OPEN` is therefore raised only for statuses other than `open`, `full`, `awaiting_captain`; a full group reports `GROUP_FULL`. |
+| N4 | **Extra search reason `BOOKING_OVERLAP`** for the §5.2 hard filter "no other booking within ±3 h", which has no reason code in the list. Client copy: "You already have a ride around that time." |
+| N5 | **Seats taken** = non-cancelled bookings, plus bookings cancelled late with no refund (the seat stays paid, T06), plus active holds. |
+| N6 | **New stops** are persisted at booking time (`core.pay`), not at hold time, and bump `route_version` only when the stop set changes. |
+| N7 | **Expiry date.** Seeded captain licences expire in 2027, so a captain is ineligible after that date and tests use 2027-02 dates. |
+| N8 | **Tests** run with `node --test "tests/**/*.test.mjs"` because `node --test tests/` fails on Node 24. Tests are T01-T12, X1-X6 plus extra coverage. |
+| N9 | **Local run.** `.env` (git-ignored) holds `DATABASE_URL` and `JUNI_DEMO_LOGIN_ENABLED`; `server/env.mjs` loads it when present. Replit-only steps (run button, Autoscale, deploy) are skipped. |
+| N10 | **Extra endpoints.** `POST /api/hold` (plain read of the caller's own hold, so the payment screen survives a reload), `POST /api/demo/settings`, `/api/demo/release-hold` and `/api/demo/last-seat-groups` (panel reads and the race clean-up). Demo helpers live in migration `0007`, with `core.demo_*`, `core.seed_checkout` and `core.last_seat_groups`. |
+| N11 | **Demo reset scope (migration `0008`).** `demo_reset_user` deletes only the caller's bookings, holds and requests; a group the caller created is deleted only if nobody else booked it. The global seed re-run in `/api/demo/reset` (§7) still removes bookings that other demo users hold in seeded groups. Acceptable for one judge at a time; revisit before parallel judging. |
+| N12 | **tsconfig** excludes `dist`, `server`, `scripts`, `tests` and `db`: `tsc` ran out of stack on the exported web bundle once `dist/` existed. |
+| N13 | **TOO_SOON in checkout** is unreachable for existing groups (the deadline in §5.6 fires at departure - 2 h, earlier than the 60-minute check). It is enforced in `create_request` and `create_group`, where it can fire. |
+
+
+| N14 | **Captain (driver) mode** (added after the original scope, migration `0009`). Demo captains log in from the login sheet ("Or try the driver app", cap-1 to cap-4) and see the trips the rules assigned to them: accept or decline (decline hands the trip to the next eligible captain), start, mark each rider picked up, complete, earnings (80% of fares collected). Endpoints `POST /api/captain/*`, functions `core.captain_*`. Riders see the status change through the normal booking screens. |
+| N15 | **Transitions.** Every screen slides up and fades in (Page animation), plus stack and tab `fade` / `fade_from_bottom` animations. |

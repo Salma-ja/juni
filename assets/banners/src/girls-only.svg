@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF4FA3"/><stop offset="1" stop-color="#C20062"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#FFE3F1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <g opacity="0.14" fill="#FFFFFF">
+    <circle cx="1080" cy="80" r="160"/><circle cx="760" cy="620" r="180"/>
+  </g>
+  <g transform="translate(800 110)">
+    <path d="M150 0 L300 55 V185 C300 285 235 350 150 385 C65 350 0 285 0 185 V55 Z" fill="url(#shield)"/>
+    <rect x="98" y="170" width="104" height="90" rx="18" fill="#E90076"/>
+    <path d="M118 172 V140 a32 32 0 0 1 64 0 V172" fill="none" stroke="#E90076" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="150" cy="208" r="12" fill="#FFFFFF"/><rect x="145" y="210" width="10" height="26" rx="5" fill="#FFFFFF"/>
+  </g>
+  <g transform="translate(700 420)" fill="#FFFFFF">
+    <circle cx="40" cy="40" r="36" opacity="0.95"/><circle cx="110" cy="40" r="36" opacity="0.8"/><circle cx="180" cy="40" r="36" opacity="0.65"/>
+  </g>
+  <g font-family="Helvetica Neue, Arial" fill="#FFFFFF">
+    <text x="80" y="160" font-size="28" font-weight="800" letter-spacing="3" opacity="0.85">SAFE BY DESIGN</text>
+    <text x="80" y="270" font-size="92" font-weight="900" letter-spacing="-3">Girls-only</text>
+    <text x="80" y="370" font-size="92" font-weight="900" letter-spacing="-3">cars</text>
+    <text x="80" y="460" font-size="34" font-weight="600" opacity="0.9">Verified students only.</text>
+    <text x="80" y="508" font-size="34" font-weight="600" opacity="0.9">Boys ride in separate cars.</text>
+  </g>
+</svg>

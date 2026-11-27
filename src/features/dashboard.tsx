@@ -1,231 +1,444 @@
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
-  ArrowRight, BadgeCheck, Car, CheckCircle2, ChevronRight, Clock3, Coins, Info, LockKeyhole,
-  MapPin, ShieldCheck, Sparkles, Star, UserPlus, Users,
+  ArrowRight, CalendarDays, CheckCircle2, ChevronRight, Clock3, Flame, Gift, GraduationCap, Heart, House,
+  LocateFixed, MapPin, Menu, Navigation, Search, Star, Users, type LucideIcon,
 } from 'lucide-react-native';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { useState } from 'react';
-import { Badge, center, Copy, Eyebrow, fill, GradientCard, Header, InfoRow, Page, Pile, ProgressBar, Row, SectionHeading, spread, TextLink, Tile } from '@/components/ui';
+import { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { BannerCarousel } from '@/components/BannerCarousel';
+import {
+  Button, center, ChoiceRow, Copy, fill, Header, IconButton, Page, Pile, ProgressBar, Row,
+  ScalePressable, SectionHeading, spread, Tile,
+} from '@/components/ui';
+import { fetchPoints, myBookings, pending, type PointsSummary } from '@/data/api';
+import { formatDate } from '@/data/format';
+import { useLoad } from '@/data/useLoad';
+import { AccountSwitch } from '@/features/accountSwitch';
+import { useAuth } from '@/features/authSession';
+import { NotificationBell, useLiveUpdates } from '@/features/liveUpdates';
+import { useLocationPref } from '@/features/locationState';
+import { HoldCard, PlanCard } from '@/features/pendingCard';
+import { SideMenu } from '@/features/sideMenu';
+import { TripCard } from '@/features/tripCard';
 import { color, shadow } from '@/theme';
-import { authClient, studentName, useAuth } from '@/features/authSession';
 
 export function HomeScreen() {
   const router = useRouter();
-  const { user, demoActive } = useAuth();
+  const { profile } = useAuth();
+  const { pickup, campus, streetNote, openAddressSheet } = useLocationPref();
+  const { appNow, refreshLive } = useLiveUpdates();
+  const { data, code: ridesError, reload } = useLoad(() => myBookings(), []);
+  const pend = useLoad(() => pending(), []);
+  const pts = useLoad(() => fetchPoints(), []);
+
+  const reloadPoints = pts.reload;
+  const reloadPending = pend.reload;
+  useFocusEffect(useCallback(() => {
+    reload();
+    reloadPending();
+    reloadPoints();
+    refreshLive();
+  }, [reload, reloadPending, reloadPoints, refreshLive]));
+
+  const active = data?.active[0] ?? null;
+  const upcomingList = data?.upcoming ?? [];
+  const next = active ?? upcomingList[0] ?? null;
+  const pointsBalance = pts.data?.balance ?? profile?.pointsBalance ?? 0;
+  const firstName = profile?.fullName?.split(' ')[0];
+  const planRide = () => router.push({ pathname: '/plan', params: { campusId: campus?.id, pickupAreaId: pickup?.id } });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pickupIcon = pickup?.location_kind === 'current_gps' ? LocateFixed : pickup?.is_custom ? House : MapPin;
+
   return (
     <Page>
-      <Row style={styles.homeHeader}>
-        <Pile gap={7} style={fill}>
-          <Eyebrow tint={color.muted} size={9}>MONDAY, 14 APRIL</Eyebrow>
-          <Copy accessibilityRole="header" size={28} weight={800} style={{ letterSpacing: -1.4 }}>{`Hi, ${studentName(user).split(/\s+/)[0]}`}</Copy>
-          <Badge icon={BadgeCheck} iconSize={14}>{demoActive ? 'Demo mode' : 'Verified student'}</Badge>
-        </Pile>
-        <Pressable accessibilityRole="button" accessibilityLabel="240 points" onPress={() => router.navigate('/points')} style={styles.pointsPill}>
-          <Coins size={17} color="#BD861D" />
-          <Copy size={16} weight={800} tint="#BD861D">240</Copy>
-        </Pressable>
-      </Row>
-      <GradientCard colors={['#37294F', '#241A39']} style={styles.planCard}>
-        <View pointerEvents="none" style={styles.planOrbit} />
-        <Row style={spread}>
-          <Eyebrow tint="#F2A3CC" size={9}>YOUR NEXT CAMPUS DAY</Eyebrow>
-          <Tile icon={Sparkles} size={37} iconSize={19} tint="#FF9BCE" background="#FFFFFF14" />
+      <Row style={spread}>
+        <IconButton icon={Menu} label="Open menu" onPress={() => setMenuOpen(true)} />
+        <Row gap={6}>
+          <Copy size={22} weight={800} tint={color.brand} style={{ letterSpacing: -0.5 }}>juni</Copy>
+          <Copy size={11} weight={700} tint={color.muted} style={{ marginTop: 6 }}>by jeeny</Copy>
         </Row>
-        <Copy size={25} weight={800} tint={color.white} style={styles.planTitle}>Heading to class?</Copy>
-        <Copy size={12} tint="#CFC5DA" style={{ lineHeight: 18, marginBottom: 19 }}>Find verified students nearby and split your ride.</Copy>
-        <Pressable accessibilityRole="button" onPress={() => router.push('/plan')} style={styles.planButton}>
-          <MapPin size={19} color={color.white} />
-          <Copy size={14} weight={800} tint={color.white} style={fill}>Plan a ride</Copy>
-          <ArrowRight size={19} color={color.white} />
-        </Pressable>
-      </GradientCard>
-      <SectionHeading title="Upcoming ride" note="View all" onPress={() => router.navigate('/rides')} />
-      <Pressable accessibilityRole="button" onPress={() => router.push('/status')} style={styles.upcoming}>
-        <Pile gap={4} style={styles.dateTile}>
-          <Copy size={18} weight={800} tint={color.brand}>15</Copy>
-          <Copy size={8} weight={800} tint={color.brand}>APR</Copy>
-        </Pile>
-        <Pile gap={8} style={fill}>
-          <Row gap={6} style={{ flexWrap: 'wrap' }}>
-            <Copy weight={800}>JUST Campus</Copy>
-            <Badge tone="amber">Awaiting captain</Badge>
-          </Row>
-          <Row gap={5}>
-            <Clock3 size={15} color={color.muted} />
-            <Copy size={10} tint={color.muted}>7:20 AM · Student Area</Copy>
-          </Row>
-        </Pile>
-        <ChevronRight size={19} color={color.ink} />
-      </Pressable>
-      <Row gap={11} style={styles.demand}>
-        <Tile icon={Users} size={39} iconSize={22} background={color.white} />
-        <Pile gap={4} style={fill}>
-          <Eyebrow>LIVE DEMAND</Eyebrow>
-          <Copy size={12} weight={800}>12 students are heading to JUST</Copy>
-          <Copy size={9} tint={color.muted}>Between 7:00–8:00 AM from nearby areas</Copy>
-        </Pile>
-        <Row gap={0} style={styles.avatarStack}>
-          {['S', 'L', 'R', '+9'].map((letter, index) => (
-            <View key={letter} style={[styles.avatarDot, index === 3 && { backgroundColor: '#20363C' }]}>
-              <Copy size={8} weight={700} tint={index === 3 ? color.white : color.ink}>{letter}</Copy>
-            </View>
-          ))}
-        </Row>
+        <NotificationBell />
       </Row>
-      <Pressable accessibilityRole="button" onPress={() => router.push('/rules')} style={styles.rules}>
-        <Info size={18} color="#68777C" />
-        <Copy size={10} tint="#68777C" style={fill}>Explore system rules & edge cases</Copy>
-        <ChevronRight size={18} color="#68777C" />
-      </Pressable>
+      <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+
+      <ScalePressable
+        accessibilityLabel={`You have ${pointsBalance} points. Fill the last seat in a group to earn 30 more`}
+        onPress={() => router.navigate('/points')}
+        style={styles.promoStrip}
+      >
+        <View style={styles.promoTag}>
+          <Star size={12} color={color.white} fill={color.white} />
+          <Copy size={12} weight={800} tint={color.white}>{`${pointsBalance}`}</Copy>
+        </View>
+        <Copy size={14} weight={700} tint={color.navy} style={fill} numberOfLines={1}>Fill the last seat, earn +30</Copy>
+        <ArrowRight size={18} color={color.navy} />
+      </ScalePressable>
+
+      <Row gap={8} style={styles.serviceRow}>
+        <ServiceTile icon={GraduationCap} label="To campus" onPress={planRide} />
+        <ServiceTile icon={MapPin} label="Pickup gate" onPress={() => openAddressSheet('gates')} />
+        <ServiceTile icon={CalendarDays} label="My trips" onPress={() => router.navigate('/rides')} />
+        <ServiceTile icon={Gift} label="+30 pts" onPress={() => router.navigate('/points')} />
+      </Row>
+
+      <ScalePressable
+        accessibilityLabel={`Where to${firstName ? `, ${firstName}` : ''}? Plan a ride to ${campus?.code ?? 'campus'}`}
+        onPress={planRide}
+        style={styles.searchBar}
+      >
+        <Search size={20} color={color.muted} />
+        <Copy size={16} weight={600} tint={color.navy} style={fill} numberOfLines={1}>
+          {firstName ? `Where to, ${firstName}?` : 'Where to?'}
+        </Copy>
+        <View style={styles.searchDivider} />
+        <Copy size={13} weight={700} tint={color.muted}>{campus?.code ?? 'Campus'}</Copy>
+      </ScalePressable>
+
+      <PlaceRow
+        icon={pickupIcon}
+        title={pickup?.name ?? 'Set your pickup'}
+        subtitle={streetNote || pickup?.gate_landmark_en || pickup?.detail || 'Current location, home pin or a gate'}
+        onPress={() => openAddressSheet('pin')}
+      />
+      <PlaceRow
+        icon={GraduationCap}
+        title={campus?.label ?? "Choose your university"}
+        subtitle="Your campus"
+        onPress={planRide}
+      />
+      <PlaceRow icon={Heart} title="Choose a saved place" onPress={() => openAddressSheet('gates')} last />
+
+      <BannerCarousel
+        banners={[
+          { id: 'last-seat', label: 'Take the last seat and earn 30 points', image: require('../../assets/banners/last-seat.jpg'), onPress: planRide },
+          { id: 'girls-only', label: 'Girls-only cars for verified students', image: require('../../assets/banners/girls-only.jpg'), onPress: planRide },
+          { id: 'ai-leave', label: 'AI picks the minute you leave', image: require('../../assets/banners/ai-leave.jpg'), onPress: planRide },
+          { id: 'split-fare', label: 'Seats from 1.12 JD, pay only for your distance', image: require('../../assets/banners/split-fare.jpg'), onPress: planRide },
+        ]}
+      />
+
+      <SectionHeading
+        title="Upcoming ride"
+        note={upcomingList.length > 1 ? `View all (${upcomingList.length})` : undefined}
+        onPress={() => router.navigate('/rides')}
+      />
+      {!data && !ridesError && <View style={styles.skeleton} />}
+      {!data && !!ridesError && (
+        <ScalePressable accessibilityLabel="Could not load your rides. Retry" onPress={reload} style={styles.emptyUpcoming}>
+          <Copy size={14} weight={700} tint={color.navy} style={fill}>Couldn’t load your rides</Copy>
+          <Copy size={13} weight={800} tint={color.brand}>Retry</Copy>
+        </ScalePressable>
+      )}
+      {!!data && (
+        <Pile gap={12}>
+          {pend.data?.hold && (
+            <HoldCard
+              hold={pend.data.hold}
+              appNow={pend.data.app_now}
+              onExpire={reloadPending}
+              onPress={() => router.push({
+                pathname: '/payment',
+                params: { holdId: pend.data!.hold!.hold_id, requestId: pend.data!.hold!.request_id ?? '' },
+              })}
+            />
+          )}
+          {!pend.data?.hold && !next && pend.data?.plan && (
+            <PlanCard
+              plan={pend.data.plan}
+              onPress={() => router.push({ pathname: '/matching', params: { requestId: pend.data!.plan!.request_id } })}
+            />
+          )}
+          {next && (
+            <TripCard
+              b={next}
+              appNow={appNow ?? data.app_now}
+              onPress={() => router.push({
+                pathname: next.status === 'confirmed' || next.status === 'in_progress' ? '/trip' : '/status',
+                params: { bookingId: next.id },
+              })}
+            />
+          )}
+          {!next && !pend.data?.hold && !pend.data?.plan && (
+            <ScalePressable
+              accessibilityLabel="No ride scheduled. Plan your first campus ride"
+              onPress={planRide}
+              style={styles.emptyUpcoming}
+            >
+              <Copy size={14} weight={700} tint={color.navy} style={fill}>No ride scheduled yet</Copy>
+              <Copy size={13} weight={800} tint={color.brand}>Plan one</Copy>
+              <ChevronRight size={16} color={color.brand} />
+            </ScalePressable>
+          )}
+        </Pile>
+      )}
     </Page>
+  );
+}
+
+function ServiceTile({ icon: Icon, label, onPress }: {
+  icon: LucideIcon; label: string; onPress: () => void;
+}) {
+  return (
+    <ScalePressable accessibilityLabel={label} onPress={onPress} style={styles.serviceTile} scaleTo={0.94}>
+      <Icon size={30} color={color.brand} strokeWidth={1.8} />
+      <Copy size={12} weight={700} tint={color.navy} numberOfLines={1} style={center}>{label}</Copy>
+    </ScalePressable>
+  );
+}
+
+function PlaceRow({ icon: Icon, title, subtitle, onPress, last = false }: {
+  icon: LucideIcon; title: string; subtitle?: string; onPress: () => void; last?: boolean;
+}) {
+  return (
+    <ScalePressable accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title} onPress={onPress} style={styles.placeRow} scaleTo={0.98}>
+      <View style={styles.placeIcon}>
+        <Icon size={20} color={color.navy} />
+      </View>
+      <View style={[styles.placeText, !last && styles.placeDivider]}>
+        <Copy size={15} weight={600} tint={color.navy} numberOfLines={1}>{title}</Copy>
+        {!!subtitle && <Copy size={13} tint={color.muted} numberOfLines={1}>{subtitle}</Copy>}
+      </View>
+    </ScalePressable>
   );
 }
 
 export function Profile() {
   const router = useRouter();
-  const { user, demoActive, exitDemo } = useAuth();
-  const name = studentName(user);
-  const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-  const [logoutError, setLogoutError] = useState('');
+  const { profile, signOut } = useAuth();
+  const { pickup, campus, streetNote, openAddressSheet, openCampusSheet } = useLocationPref();
+  const name = profile?.fullName ?? 'Student';
   const [signingOut, setSigningOut] = useState(false);
-  const inactive = () => {};
 
   async function logOut() {
-    if (demoActive) {
-      exitDemo();
-      return;
-    }
-    if (!authClient || signingOut) return;
+    if (signingOut) return;
     setSigningOut(true);
-    setLogoutError('');
-    try {
-      const { error } = await authClient.auth.signOut({ scope: 'local' });
-      if (error) throw error;
-    } catch (cause) {
-      setLogoutError(cause instanceof Error ? cause.message : 'Could not log out. Try again.');
-    } finally {
-      setSigningOut(false);
-    }
+    await signOut();
+    setSigningOut(false);
+    router.replace('/login');
   }
 
+  const prefLabel = profile?.gender === 'female' ? 'Girls-only' : 'Boys-only';
+
   return (
     <Page>
-      <Header title="Profile" action={<TextLink>Edit</TextLink>} />
-      <Pile gap={7} style={styles.profile}>
-        <GradientCard colors={['#CCEAE1', '#8DCEBB']} style={styles.profileAvatar}>
-          <Copy size={20} weight={800} tint="#146750">{initials}</Copy>
-        </GradientCard>
-        <Copy accessibilityRole="header" size={20} weight={800} style={center}>{name}</Copy>
-        <Copy size={9} tint={color.muted}>{user?.email}</Copy>
-        <Badge icon={BadgeCheck} iconSize={14} style={{ alignSelf: 'center' }}>{demoActive ? 'Demo mode' : 'Verified student'}</Badge>
-      </Pile>
-      {!demoActive && <Pile gap={7} style={styles.profileSection}>
-        <Eyebrow>UNIVERSITY</Eyebrow>
-        <View style={styles.profileRows}><InfoRow icon={ShieldCheck} label="Verified university email" value={user?.email ?? ''} /></View>
-      </Pile>}
-      <Pile gap={7} style={styles.profileSection}>
-        <Eyebrow>RIDE PREFERENCES</Eyebrow>
-        <View style={styles.profileRows}>
-          <InfoRow icon={MapPin} label="Home location" value="Student Area, Irbid" onPress={inactive} style={styles.divider} />
-          <InfoRow icon={Users} label="Group preference" value="Girls-only" onPress={inactive} />
+      <Row gap={14} style={{ marginTop: 6 }}>
+        <View style={styles.avatar}>
+          <Copy size={24} weight={800} tint={color.white}>{name.slice(0, 1)}</Copy>
         </View>
-      </Pile>
-      <Pile gap={7} style={styles.profileSection}>
-        <Eyebrow>ACTIVITY</Eyebrow>
-        <View style={styles.profileRows}>
-          <InfoRow icon={Car} label="Ride history" value="12 completed rides" onPress={() => router.navigate('/rides')} style={styles.divider} />
-          <InfoRow icon={Coins} label="JUNI Points" value="240 points" onPress={() => router.navigate('/points')} />
-        </View>
-      </Pile>
-      {!!logoutError && <Copy accessibilityRole="alert" tint={color.danger}>{logoutError}</Copy>}
-      <TextLink tint="#BC4242" size={11} style={styles.signout}
-        onPress={logOut}>{signingOut ? 'Logging out…' : 'Log out'}</TextLink>
-    </Page>
-  );
-}
-
-const earningRules = [
-  [Car, 'Complete a ride', '+30 pts'],
-  [Star, '5 rides without cancellation', '+15 pts'],
-  [UserPlus, 'Fill the last group seat', '+50 pts'],
-  [Users, 'Invite a classmate', '+50 pts'],
-] as const;
-
-export function Points() {
-  return (
-    <Page>
-      <Header title="Points & rewards" action={<Info size={20} color={color.ink} />} />
-      <GradientCard colors={['#382A52', '#241A39']} style={{ borderRadius: 21 }}>
-        <Eyebrow size={8} tint="#F2A3CC">YOUR BALANCE</Eyebrow>
-        <Row gap={3} style={{ alignItems: 'baseline', marginTop: 7, marginBottom: 16 }}>
-          <Copy size={39} weight={800} tint={color.white} style={{ letterSpacing: -2.34 }}>240</Copy>
-          <Copy size={12} weight={700} tint="#CFC5DA">points</Copy>
-        </Row>
-        <ProgressBar value={80} height={7} track="#FFFFFF1F" />
-        <Row style={[spread, { marginVertical: 8 }]}>
-          <Copy size={8} weight={700} tint={color.white}>60 points to go</Copy>
-          <Copy size={8} tint="#CFC5DA">until your next free ride</Copy>
-        </Row>
-        <Pressable accessibilityRole="button" accessibilityState={{ disabled: true }} disabled style={styles.redeem}>
-          <LockKeyhole size={17} color="#A99EB5" />
-          <Copy size={9} weight={700} tint="#A99EB5">Redeem 300 points for a free ride</Copy>
-        </Pressable>
-      </GradientCard>
-      <Row gap={10} style={styles.rewardBanner}>
-        <Tile icon={Star} size={37} iconSize={23} tint="#BC8217" background="#FFE9A8" />
-        <Pile gap={3}>
-          <Copy size={10} weight={800}>1 free ride = 300 points</Copy>
-          <Copy size={8} tint={color.muted}>Up to 1.50 JD value</Copy>
+        <Pile gap={2} style={fill}>
+          <Copy accessibilityRole="header" size={22} weight={800} tint={color.navy}>{name}</Copy>
+          <Row gap={6}>
+            <CheckCircle2 size={14} color={color.emerald} />
+            <Copy size={13} weight={600} tint={color.muted}>{`Verified · ${prefLabel}`}</Copy>
+          </Row>
         </Pile>
       </Row>
-      <SectionHeading title="Ways to earn" note="Earn more, ride more" />
-      <View style={styles.earnList}>
-        {earningRules.map(([Icon, title, points], index) => (
-          <Row gap={10} key={title} style={[styles.earnRow, index < earningRules.length - 1 && styles.divider]}>
-            <Tile icon={Icon} size={34} iconSize={20} />
-            <Copy size={9} weight={800} style={fill}>{title}</Copy>
-            <Copy size={9} weight={800} tint={color.brand}>{points}</Copy>
-          </Row>
-        ))}
+
+      <SectionHeading title="Commute" />
+      <ChoiceRow
+        icon={pickup?.is_custom ? House : MapPin}
+        title={pickup?.name ?? 'Set pickup'}
+        detail={streetNote || pickup?.gate_landmark_en || 'Pickup'}
+        onPress={() => openAddressSheet('pin')}
+      />
+      <ChoiceRow
+        icon={GraduationCap}
+        title={campus?.label ?? 'Choose university'}
+        detail="University"
+        onPress={openCampusSheet}
+        last
+      />
+
+      <SectionHeading title="Activity" />
+      <ChoiceRow
+        icon={Star}
+        title="Points"
+        detail="Fill a last seat for +30"
+        value={`${profile?.pointsBalance ?? 0}`}
+        onPress={() => router.navigate('/points')}
+      />
+      <ChoiceRow
+        icon={CalendarDays}
+        title="My trips"
+        onPress={() => router.navigate('/rides')}
+        last
+      />
+
+      <View style={{ marginTop: 18 }}>
+        <AccountSwitch />
       </View>
-      <SectionHeading title="Recent activity" />
-      <LedgerRow icon={CheckCircle2} title="Ride completed · 8 Apr" value="+30" />
-      <LedgerRow icon={UserPlus} title="Invited Lina · 2 Apr" value="+50" />
+
+      <Button tone="secondary" style={{ marginTop: 18 }} onPress={logOut}>
+        {signingOut ? 'Signing out…' : 'Sign out'}
+      </Button>
     </Page>
   );
 }
 
-function LedgerRow({ icon: Icon, title, value }: { icon: typeof UserPlus; title: string; value: string }) {
+export function Points() {
+  const router = useRouter();
+  const { campus, pickup } = useLocationPref();
+  const { data, reload } = useLoad<PointsSummary>(() => fetchPoints(), []);
+
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
+
+  const balance = data?.balance ?? 120;
+  const target = data?.target ?? 300;
+  const remaining = Math.max(0, target - balance);
+  const pct = Math.min(100, Math.round((balance / target) * 100));
+
   return (
-    <Row gap={7} style={[styles.divider, { paddingVertical: 10, paddingHorizontal: 3 }]}>
-      <Icon size={18} color={color.brand} />
-      <Copy size={9} tint={color.muted} style={fill}>{title}</Copy>
-      <Copy size={9} weight={800} tint={color.brand}>{value}</Copy>
+    <Page>
+      <Header title="Points" />
+
+      <Copy size={13} weight={700} tint={color.muted} style={{ marginTop: 8 }}>Balance</Copy>
+      <Row gap={6} style={{ alignItems: 'baseline' }}>
+        <Copy size={64} weight={800} tint={color.navy} style={{ letterSpacing: -2.5, lineHeight: 70 }}>{String(balance)}</Copy>
+        <Copy size={20} weight={800} tint={color.brand}>pts</Copy>
+      </Row>
+      <View style={{ marginTop: 8 }}>
+        <ProgressBar value={pct} height={6} />
+      </View>
+      <Copy size={13} tint={color.muted} style={{ marginTop: 8 }}>
+        {remaining === 0 ? 'Free ride unlocked' : `${remaining} pts to a free ride`}
+      </Copy>
+
+      <SectionHeading title="Earn" />
+      <ChoiceRow
+        icon={Flame}
+        title="Fill a last seat"
+        detail="Book seat 4 of 4"
+        value="+30"
+        highlight
+        onPress={() => router.push({ pathname: '/plan', params: { campusId: campus?.id, pickupAreaId: pickup?.id } })}
+      />
+      <ChoiceRow icon={Navigation} title="Finish a ride" value="+10" />
+      <ChoiceRow icon={Clock3} title="On time at pickup" value="+15" />
+      <ChoiceRow icon={Users} title="Invite a classmate" value="+50" last />
+
+      {data && data.ledger.length > 0 && (
+        <>
+          <SectionHeading title="History" />
+          {data.ledger.map((entry, i) => (
+            <ChoiceRow
+              key={entry.id}
+              title={entry.label}
+              detail={formatDate(entry.created_at)}
+              value={`+${entry.delta}`}
+              last={i === data.ledger.length - 1}
+            />
+          ))}
+        </>
+      )}
+    </Page>
+  );
+}
+
+function RewardRow({ icon: Icon, title, detail, pts }: {
+  icon: typeof Star; title: string; detail: string; pts: string;
+}) {
+  return (
+    <Row gap={12} style={styles.reward}>
+      <Tile icon={Icon} size={42} iconSize={20} />
+      <Pile gap={2} style={fill}>
+        <Copy size={14} weight={800} tint={color.navy}>{title}</Copy>
+        <Copy size={12} tint={color.muted}>{detail}</Copy>
+      </Pile>
+      <Copy size={15} weight={800} tint={color.brand}>{pts}</Copy>
     </Row>
   );
 }
 
 const styles = StyleSheet.create({
-  homeHeader: { alignItems: 'flex-start', justifyContent: 'space-between', paddingTop: 8, paddingHorizontal: 1, paddingBottom: 23 },
-  pointsPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E1EAE7', borderRadius: 999, paddingVertical: 9, paddingHorizontal: 12 },
-  planCard: { overflow: 'hidden', ...shadow(18, 35, '#2B214233') },
-  planOrbit: { position: 'absolute', width: 150, height: 150, borderWidth: 25, borderColor: '#36C09D17', borderRadius: 75, right: -55, top: -28 },
-  planTitle: { marginTop: 18, marginBottom: 5, letterSpacing: -1 },
-  planButton: { flexDirection: 'row', gap: 9, alignItems: 'center', minHeight: 49, borderRadius: 13, paddingHorizontal: 14, backgroundColor: color.brand },
-  upcoming: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: color.line, borderRadius: 17, padding: 13 },
-  dateTile: { width: 48, height: 51, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: color.pink },
-  demand: { backgroundColor: color.sage, padding: 16, marginTop: 13, borderRadius: 17, alignItems: 'flex-start', minHeight: 82 },
-  avatarStack: { position: 'absolute', right: 13, bottom: 11 },
-  avatarDot: { width: 25, height: 25, borderWidth: 2, borderColor: color.sage, borderRadius: 13, backgroundColor: '#D9C8BA', marginLeft: -6, alignItems: 'center', justifyContent: 'center' },
-  rules: { flexDirection: 'row', alignItems: 'center', paddingTop: 17, paddingHorizontal: 3, gap: 9 },
-  profile: { alignItems: 'center', paddingTop: 6, paddingBottom: 19 },
-  profileAvatar: { width: 75, height: 75, padding: 0, borderRadius: 25, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  profileSection: { marginTop: 18 },
-  profileRows: { borderWidth: 1, borderColor: color.line, borderRadius: 13, overflow: 'hidden' },
-  divider: { borderBottomWidth: 1, borderBottomColor: color.line },
-  signout: { marginTop: 22, padding: 14, alignItems: 'center' },
-  redeem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, backgroundColor: '#FFFFFF17' },
-  rewardBanner: { marginTop: 13, marginBottom: 4, padding: 13, borderRadius: 15, backgroundColor: '#FFF7DF' },
-  earnList: { borderRadius: 16, borderWidth: 1, borderColor: color.line, overflow: 'hidden' },
-  earnRow: { padding: 11 },
+  promoStrip: {
+    marginTop: 14,
+    minHeight: 48,
+    paddingLeft: 6,
+    paddingRight: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: color.line,
+    backgroundColor: color.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  promoTag: {
+    height: 32,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: color.brand,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  serviceRow: { marginTop: 16 },
+  serviceTile: {
+    flex: 1,
+    aspectRatio: 0.92,
+    borderRadius: 18,
+    backgroundColor: color.pink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  searchBar: {
+    marginTop: 18,
+    minHeight: 56,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: color.soft,
+    borderWidth: 1,
+    borderColor: color.line,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    ...shadow(3, 10, '#271C3A12'),
+  },
+  searchDivider: { width: 1, height: 26, backgroundColor: color.line },
+  placeRow: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  placeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: color.soft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeText: { flex: 1, minHeight: 64, justifyContent: 'center', gap: 2 },
+  placeDivider: { borderBottomWidth: 1, borderBottomColor: color.line },
+  skeleton: { height: 74, borderRadius: 22, backgroundColor: color.soft },
+  emptyUpcoming: {
+    minHeight: 74,
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: color.pinkBorder,
+    backgroundColor: '#FFF9FC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.brand,
+  },
+  reward: {
+    borderWidth: 1,
+    borderColor: color.line,
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: color.white,
+  },
 });
