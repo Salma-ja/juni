@@ -1,10 +1,10 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   AlertTriangle, ArrowLeft, Bell, Car, Check, CheckCircle2, Clock3, Coins, Copy as CopyIcon,
   LockKeyhole, MapPin, Navigation, Phone, Route, ShieldCheck, Zap,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -14,16 +14,39 @@ import {
   SheetHandle, SheetHeading, spread, TextLink, Tile,
 } from '@/components/ui';
 import { color, shadow } from '@/theme';
-import { useRideSchedule } from '@/features/rideSchedule';
+import {
+  booking as loadBooking, cancelBooking, logSos, myBookings, type BookingData, type BookingStatus, type CancelResult,
+} from '@/data/api';
+import { errorCopy } from '@/data/errors';
+import { formatDate, formatFils, formatTime } from '@/data/format';
+import { useLoad } from '@/data/useLoad';
+import { useAuth } from '@/features/authSession';
 
 const rideTabs = ['Upcoming', 'Active', 'Past'] as const;
 type RideTab = (typeof rideTabs)[number];
 
+export const statusBadge: Record<BookingStatus, { label: string; tone: 'green' | 'amber' | 'slate' | 'red' }> = {
+  seat_booked: { label: 'Seat booked', tone: 'amber' },
+  awaiting_captain: { label: 'Awaiting captain', tone: 'amber' },
+  confirmed: { label: 'Confirmed', tone: 'green' },
+  in_progress: { label: 'In progress', tone: 'green' },
+  completed: { label: 'Completed', tone: 'slate' },
+  cancelled: { label: 'Cancelled', tone: 'red' },
+};
+
+const refundLine = (b: BookingData) =>
+  !b.refund ? formatFils(b.fare_fils) : b.refund.amount_fils > 0 ? `Full refund issued · ${formatFils(b.refund.amount_fils)}` : 'No refund';
+
 export function MyRides() {
   const router = useRouter();
   const [tab, setTab] = useState<RideTab>('Upcoming');
-  const [cancel, setCancel] = useState(false);
-  const closeCancel = () => setCancel(false);
+  const [target, setTarget] = useState<BookingData | null>(null);
+  const { data, code, reload } = useLoad(() => myBookings(), []);
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
+  const lists: Record<RideTab, BookingData[]> = {
+    Upcoming: data?.upcoming ?? [], Active: data?.active ?? [], Past: data?.past ?? [],
+  };
+  const items = lists[tab];
   return (
     <Page>
       <Header title="My rides" action={<IconButton icon={Bell} label="Notifications" />} />
@@ -35,102 +58,173 @@ export function MyRides() {
           </Pressable>
         ))}
       </Row>
-      {tab === 'Past' ? (
-        <Pile gap={12}>
-          <PastRide date="08 APR · 7:30 AM" route="Student Area → JUST" detail="1.50 JD · 4 students" />
-          <PastRide date="02 APR · 8:10 AM" route="Al-Husn → JUST" detail="Full refund issued" cancelled />
-        </Pile>
-      ) : (
-        <Card>
-          <Row style={spread}>
-            <Eyebrow tint={color.muted} size={9}>TOMORROW · 7:20 AM</Eyebrow>
-            <Badge>Confirmed</Badge>
-          </Row>
-          <Row gap={13} style={{ marginVertical: 22 }}>
-            <LinearGradient colors={[color.brand, color.brand, '#CBD8D4', '#CBD8D4']} locations={[0, 0.45, 0.45, 1]}
-              style={styles.rideRouteLine} />
-            <Pile gap={3} style={fill}>
-              <Copy size={11} weight={800}>Student Area, Irbid</Copy>
-              <Copy size={8} tint={color.muted} style={{ marginBottom: 12 }}>Pickup</Copy>
-              <Copy size={11} weight={800}>JUST Main Campus</Copy>
-              <Copy size={8} tint={color.muted} style={{ marginBottom: 12 }}>Destination</Copy>
-            </Pile>
-          </Row>
-          <CaptainMini label="YOUR CAPTAIN" title="Omar Khalil" accessory={<ShieldCheck size={19} color={color.brand} />} />
-          <Button style={{ marginTop: 13 }} onPress={() => router.push('/trip')}>View trip details</Button>
-          <TextLink tint="#B44343" size={10} style={styles.cancelLink} onPress={() => setCancel(true)}>Cancel booking</TextLink>
+      {!!code && <Copy tint={color.danger}>{errorCopy(code)}</Copy>}
+      {data && items.length === 0 && (
+        <Card style={styles.emptyCard}>
+          <Copy size={14} weight={800}>{`No ${tab.toLowerCase()} rides`}</Copy>
+          {tab === 'Upcoming' && <Button onPress={() => router.push('/plan')}>Plan a ride</Button>}
         </Card>
       )}
-      {cancel && (
-        <BottomSheet onClose={closeCancel}>
-          <SheetHandle />
-          <SheetHeading icon={Clock3} tone="amber" title="Cancel your booking?" detail="Your ride is more than 12 hours away." />
-          <Row style={[spread, styles.refund]}>
-            <Pile gap={5}><Copy size={9} tint={color.muted}>Refund amount</Copy><Copy size={16} weight={800}>1.50 JD</Copy></Pile>
-            <Badge style={{ alignSelf: 'center' }}>Full refund</Badge>
-          </Row>
-          <Button tone="danger" onPress={closeCancel}>Confirm cancellation</Button>
-          <Button tone="secondary" onPress={closeCancel}>Keep my seat</Button>
-        </BottomSheet>
+      <Pile gap={12}>
+        {items.map((b) => tab === 'Past'
+          ? <PastRide key={b.id} b={b} />
+          : <RideCard key={b.id} b={b} onCancel={() => setTarget(b)} />)}
+      </Pile>
+      {target && data && (
+        <CancelSheet b={target} appNow={data.app_now} onClose={() => { setTarget(null); reload(); }} />
       )}
     </Page>
   );
 }
 
-function PastRide({ date, route, detail, cancelled = false }: { date: string; route: string; detail: string; cancelled?: boolean }) {
+function RideCard({ b, onCancel }: { b: BookingData; onCancel: () => void }) {
+  const router = useRouter();
+  const badge = statusBadge[b.status];
+  const live = b.status === 'confirmed' || b.status === 'in_progress';
+  return (
+    <Card>
+      <Row style={spread}>
+        <Eyebrow tint={color.muted} size={9}>{`${formatDate(b.pickup_at).toUpperCase()} · ${formatTime(b.pickup_at)}`}</Eyebrow>
+        <Badge tone={badge.tone}>{badge.label}</Badge>
+      </Row>
+      <Row gap={13} style={{ marginVertical: 22 }}>
+        <LinearGradient colors={[color.brand, color.brand, '#CBD8D4', '#CBD8D4']} locations={[0, 0.45, 0.45, 1]}
+          style={styles.rideRouteLine} />
+        <Pile gap={3} style={fill}>
+          <Copy size={11} weight={800}>{b.pickup_area.name}</Copy>
+          <Copy size={8} tint={color.muted} style={{ marginBottom: 12 }}>Pickup</Copy>
+          <Copy size={11} weight={800}>{b.campus.label}</Copy>
+          <Copy size={8} tint={color.muted} style={{ marginBottom: 12 }}>Destination</Copy>
+        </Pile>
+      </Row>
+      {b.captain && b.captain_confirmed && (
+        <CaptainMini label="YOUR CAPTAIN" title={b.captain.name} accessory={<ShieldCheck size={19} color={color.brand} />} />
+      )}
+      <Button style={{ marginTop: 13 }}
+        onPress={() => router.push({ pathname: live ? '/trip' : '/status', params: { bookingId: b.id } })}>
+        {live ? 'View trip details' : 'View booking status'}
+      </Button>
+      {b.status !== 'in_progress' && (
+        <TextLink tint="#B44343" size={10} style={styles.cancelLink} onPress={onCancel}>Cancel booking</TextLink>
+      )}
+    </Card>
+  );
+}
+
+function CancelSheet({ b, appNow, onClose }: { b: BookingData; appNow: string; onClose: () => void }) {
+  const hours = (new Date(b.pickup_at).getTime() - new Date(appNow).getTime()) / 3_600_000;
+  const full = hours >= 12;
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<CancelResult | null>(null);
+  const [code, setCode] = useState('');
+
+  async function confirm() {
+    if (busy) return;
+    setBusy(true);
+    const res = await cancelBooking(b.id);
+    setBusy(false);
+    if (res.ok) setDone(res.data); else setCode(res.code);
+  }
+
+  return (
+    <BottomSheet onClose={onClose}>
+      <SheetHandle />
+      {done ? (
+        <>
+          <SheetHeading icon={CheckCircle2} title={done.refund_fils > 0 ? 'Booking cancelled' : 'Booking cancelled · no refund'}
+            detail={done.refund_fils > 0 ? `Full refund issued · ${formatFils(done.refund_fils)}` : 'Your seat stays paid for this ride.'} />
+          <Button onPress={onClose}>Done</Button>
+        </>
+      ) : (
+        <>
+          <SheetHeading icon={Clock3} tone="amber" title="Cancel your booking?"
+            detail={full ? 'Your ride is more than 12 hours away.' : 'Your ride is less than 12 hours away.'} />
+          <Row style={[spread, styles.refund]}>
+            <Pile gap={5}>
+              <Copy size={9} tint={color.muted}>Refund amount</Copy>
+              <Copy size={16} weight={800}>{full ? formatFils(b.fare_fils) : formatFils(0)}</Copy>
+            </Pile>
+            <Badge tone={full ? 'green' : 'red'} style={{ alignSelf: 'center' }}>{full ? 'Full refund' : 'No refund'}</Badge>
+          </Row>
+          <Copy size={10} tint={color.muted}>{full ? `Full refund · ${formatFils(b.fare_fils)}` : 'No refund · seat stays paid'}</Copy>
+          {!!code && <Copy accessibilityRole="alert" tint={color.danger}>{errorCopy(code)}</Copy>}
+          <Button tone="danger" disabled={busy} onPress={confirm}>{busy ? 'Cancelling…' : 'Confirm cancellation'}</Button>
+          <Button tone="secondary" onPress={onClose}>Keep my seat</Button>
+        </>
+      )}
+    </BottomSheet>
+  );
+}
+
+function PastRide({ b }: { b: BookingData }) {
+  const cancelled = b.status === 'cancelled';
   return (
     <Card style={styles.pastCard}>
-      <Row style={spread}><Eyebrow tint={color.muted} size={9}>{date}</Eyebrow>
+      <Row style={spread}><Eyebrow tint={color.muted} size={9}>{`${formatDate(b.pickup_at).toUpperCase()} · ${formatTime(b.pickup_at)}`}</Eyebrow>
         <Badge tone={cancelled ? 'red' : 'slate'}>{cancelled ? 'Cancelled' : 'Completed'}</Badge></Row>
-      <Copy size={14} weight={800} style={{ marginTop: 8 }}>{route}</Copy>
-      <Copy size={9} tint={color.muted}>{detail}</Copy>
+      <Copy size={14} weight={800} style={{ marginTop: 8 }}>{`${b.pickup_area.name} → ${b.campus.code}`}</Copy>
+      <Copy size={9} tint={color.muted}>{cancelled ? refundLine(b) : formatFils(b.fare_fils)}</Copy>
     </Card>
   );
 }
 
 export function TripDetails() {
   const router = useRouter();
-  const schedule = useRideSchedule();
+  const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
+  const { data, code } = useLoad(() => loadBooking(bookingId), [bookingId]);
+  if (!data) {
+    return (
+      <Page>
+        <Header title="Trip details" onBack={() => router.dismissTo('/rides')} />
+        <Copy tint={code ? color.danger : color.muted}>{code ? errorCopy(code) : 'Loading trip…'}</Copy>
+      </Page>
+    );
+  }
+  const badge = statusBadge[data.status];
+  const first = data.captain?.name.split(' ')[0];
   return (
     <Page>
       <Header title="Trip details" onBack={() => router.dismissTo('/rides')} />
       <Row style={[spread, { marginBottom: 12 }]}>
-        <Row gap={5}><View style={styles.statusDot} /><Eyebrow size={8}>CONFIRMED</Eyebrow></Row>
-        <Copy size={9} weight={800}>{`${schedule.departureDate} · ${schedule.departure}`}</Copy>
+        <Row gap={5}><View style={styles.statusDot} /><Eyebrow size={8}>{badge.label.toUpperCase()}</Eyebrow></Row>
+        <Copy size={9} weight={800}>{`${formatDate(data.departure_at)} · ${formatTime(data.departure_at)}`}</Copy>
       </Row>
-      <Row gap={12} style={styles.captainCard}>
-        <CaptainPhoto style={styles.captainPhoto} />
-        <Pile gap={4} style={fill}>
-          <Badge icon={ShieldCheck}>Licensed captain</Badge>
-          <Copy size={15} weight={800} tint={color.white} style={{ marginTop: 4 }}>Omar Khalil</Copy>
-          <Copy size={8} tint="#C2B8CE">Toyota Prius · White</Copy>
-          <Pile gap={1} style={styles.plate}><Copy size={10} weight={800} tint={color.navy}>21-84567</Copy>
-            <Copy size={5} weight={700} tint={color.navy} style={center}>JORDAN</Copy></Pile>
-        </Pile>
-        <IconButton icon={Phone} label="Call Captain Omar" tint="#FF83C1" style={styles.darkPhone} />
-      </Row>
+      {data.captain && data.vehicle ? (
+        <Row gap={12} style={styles.captainCard}>
+          <CaptainPhoto style={styles.captainPhoto} />
+          <Pile gap={4} style={fill}>
+            <Badge icon={ShieldCheck}>Licensed captain</Badge>
+            <Copy size={15} weight={800} tint={color.white} style={{ marginTop: 4 }}>{data.captain.name}</Copy>
+            <Copy size={8} tint="#C2B8CE">{`${data.vehicle.make_model} · ${data.vehicle.color}`}</Copy>
+            <Pile gap={1} style={styles.plate}><Copy size={10} weight={800} tint={color.navy}>{data.vehicle.plate}</Copy>
+              <Copy size={5} weight={700} tint={color.navy} style={center}>JORDAN</Copy></Pile>
+          </Pile>
+          <IconButton icon={Phone} label={`Call Captain ${first}`} tint="#FF83C1" style={styles.darkPhone} />
+        </Row>
+      ) : (
+        <Card><Copy size={11} tint={color.muted}>A captain has not been confirmed yet.</Copy></Card>
+      )}
       <RouteCard style={styles.journey}
-        start={{ label: `PICKUP · ${schedule.departure}`, title: 'Student Area, Irbid', detail: 'Near Al-Husn Road' }}
-        end={{ label: `ARRIVAL · ETA ${schedule.arrival}`, title: schedule.campus.label,
-          detail: schedule.campus.id === 'just' ? 'South Gate' : 'University destination' }}
+        start={{ label: `PICKUP · ${formatTime(data.pickup_at)}`, title: data.pickup_area.name, detail: data.pickup_area.detail }}
+        end={{ label: `ARRIVAL · ${formatTime(data.arrival_at)}`, title: data.campus.label, detail: data.stops.map((s) => s.name).join(' → ') }}
       />
       <Row gap={10}>
-        <TripStat icon={Clock3} title="TRIP TIME" detail="32 min" />
-        <TripStat icon={Coins} title="YOUR FARE" detail="1.50 JD" />
+        <TripStat icon={Clock3} title="TRIP TIME" detail={`${data.route_minutes} min`} />
+        <TripStat icon={Coins} title="YOUR FARE" detail={formatFils(data.fare_fils)} />
       </Row>
-      <SectionHeading title="Group members" note="4/4 verified" />
+      <SectionHeading title="Group members" note={`${data.members.length}/${data.capacity} verified`} />
       <Row gap={19} style={{ alignItems: 'flex-start' }}>
-        {['S', 'L', 'R', 'N'].map((letter, index) => (
-          <View key={letter}>
-            <Avatar name={letter} index={index} />
-            <View style={styles.avatarCheck}><Check size={11} color={color.white} /></View>
-            {index === 0 && <Copy size={7} style={[center, { marginTop: 3 }]}>You</Copy>}
+        {data.members.map((m, index) => (
+          <View key={`${m.first_name}-${index}`}>
+            <Avatar name={m.first_name[0]} index={index} />
+            {m.verified && <View style={styles.avatarCheck}><Check size={11} color={color.white} /></View>}
+            <Copy size={7} style={[center, { marginTop: 3 }]}>{m.is_you ? 'You' : m.first_name}</Copy>
           </View>
         ))}
       </Row>
       <Row gap={9} style={{ marginTop: 22 }}>
-        <Button icon={Navigation} style={styles.tripAction} size={11} onPress={() => router.push({ pathname: '/tracking', params: schedule.params })}>Track live</Button>
-        <Button tone="secondary" icon={ShieldCheck} style={styles.tripAction} size={11} onPress={() => router.push({ pathname: '/safety', params: schedule.params })}>Safety & share</Button>
+        <Button icon={Navigation} style={styles.tripAction} size={11} onPress={() => router.push({ pathname: '/tracking', params: { bookingId } })}>Track live</Button>
+        <Button tone="secondary" icon={ShieldCheck} style={styles.tripAction} size={11} onPress={() => router.push({ pathname: '/safety', params: { bookingId } })}>Safety & share</Button>
       </Row>
     </Page>
   );
@@ -147,9 +241,16 @@ function TripStat({ icon: Icon, title, detail }: { icon: typeof Clock3; title: s
 
 export function Tracking() {
   const router = useRouter();
-  const schedule = useRideSchedule();
+  const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
+  const { data } = useLoad(() => loadBooking(bookingId), [bookingId]);
   const { height } = useWindowDimensions();
   const { top, bottom } = useSafeAreaInsets();
+  const back = () => router.dismissTo({ pathname: '/trip', params: { bookingId } });
+  const nowMs = data ? new Date(data.app_now).getTime() : 0;
+  const etaMin = data ? Math.max(0, Math.round((new Date(data.arrival_at).getTime() - nowMs) / 60000)) : 0;
+  const progress = data
+    ? Math.max(0, Math.min(100, ((nowMs - new Date(data.departure_at).getTime()) / 60000 / Math.max(data.route_minutes, 1)) * 100))
+    : 0;
   return (
     <Page mode="edge" style={styles.trackingPage}>
       <LinearGradient colors={['#DFEAE5', '#ECF2EE']} start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
@@ -160,25 +261,28 @@ export function Tracking() {
           <Path d="M70 470 C110 390, 40 310, 145 260 S300 210, 322 74"
             fill="none" stroke={color.brand} strokeWidth={7} strokeLinecap="round" strokeDasharray="1 11" />
         </Svg>
-        <IconButton icon={ArrowLeft} label="Go back" size={21} onPress={() => router.dismissTo('/trip')}
+        <IconButton icon={ArrowLeft} label="Go back" size={21} onPress={back}
           style={[styles.mapBack, { top: top + 18 }]} />
         <Badge tone="violet" icon={Zap} style={[styles.mapBadge, { top: top + 22 }]}>Simulated GPS tracking</Badge>
         <View style={styles.mapStart}><MapPin size={24} color={color.brand} fill={color.brand} /></View>
         <View style={styles.carMarker}><Car size={21} color={color.white} /></View>
-        <View style={styles.mapEnd}><Copy weight={800} tint={color.white}>{schedule.campus.code[0]}</Copy></View>
-        <Copy weight={800} size={8} style={styles.campusMapLabel}>{schedule.campus.label}</Copy>
+        <View style={styles.mapEnd}><Copy weight={800} tint={color.white}>{data?.campus.code[0] ?? ''}</Copy></View>
+        <Copy weight={800} size={8} style={styles.campusMapLabel}>{data?.campus.label ?? ''}</Copy>
       </LinearGradient>
       <View style={[styles.trackingSheet, { minHeight: height * 0.38, paddingBottom: 25 + bottom }]}>
         <SheetHandle />
         <Row style={spread}>
           <Pile gap={3}><Copy size={8} weight={700} tint={color.muted}>ARRIVING IN</Copy>
-            <Copy size={26} weight={800} style={{ letterSpacing: -1.04 }}>18 min</Copy></Pile>
-          <Badge style={{ alignSelf: 'center' }}>On time</Badge>
+            <Copy size={26} weight={800} style={{ letterSpacing: -1.04 }}>{data ? `${etaMin} min` : '…'}</Copy></Pile>
+          {data && <Badge style={{ alignSelf: 'center' }}>{statusBadge[data.status].label}</Badge>}
         </Row>
-        <View style={{ marginVertical: 14 }}><ProgressBar value={58} /></View>
-        <CaptainMini label="CAPTAIN OMAR · 21-84567" title={`Heading to ${schedule.campus.label}`}
-          accessory={<IconButton icon={Phone} label="Call Captain Omar" tint={color.brand} style={styles.lightPhone} size={18} />} />
-        <Button tone="secondary" icon={ShieldCheck} style={{ marginTop: 12 }} onPress={() => router.push({ pathname: '/safety', params: schedule.params })}>Safety & share</Button>
+        <View style={{ marginVertical: 14 }}><ProgressBar value={progress} /></View>
+        {data && (
+          <CaptainMini label={data.captain && data.vehicle ? `CAPTAIN ${data.captain.name.split(' ')[0].toUpperCase()} · ${data.vehicle.plate}` : 'CAPTAIN PENDING'}
+            title={`Heading to ${data.campus.label}`}
+            accessory={<IconButton icon={Phone} label="Call captain" tint={color.brand} style={styles.lightPhone} size={18} />} />
+        )}
+        <Button tone="secondary" icon={ShieldCheck} style={{ marginTop: 12 }} onPress={() => router.push({ pathname: '/safety', params: { bookingId } })}>Safety & share</Button>
       </View>
     </Page>
   );
@@ -186,13 +290,28 @@ export function Tracking() {
 
 export function Safety() {
   const router = useRouter();
-  const schedule = useRideSchedule();
+  const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
+  const { profile } = useAuth();
+  const { data } = useLoad(() => loadBooking(bookingId), [bookingId]);
   const [copied, setCopied] = useState(false);
   const [sos, setSos] = useState<'idle' | 'confirm' | 'sent'>('idle');
-  const closeSos = () => setSos('idle');
+  const [sosCode, setSosCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const closeSos = () => { setSos('idle'); setError(''); };
+  const firstName = profile?.fullName.split(' ')[0] ?? 'Your';
+
+  async function sendSos() {
+    if (busy) return;
+    setBusy(true);
+    const res = await logSos(bookingId);
+    setBusy(false);
+    if (res.ok) { setSosCode(res.data.code); setSos('sent'); } else setError(errorCopy(res.code));
+  }
+
   return (
     <Page>
-      <Header title="Safety center" onBack={() => router.dismissTo('/trip')} />
+      <Header title="Safety center" onBack={() => router.dismissTo({ pathname: '/trip', params: { bookingId } })} />
       <Pile gap={5} style={styles.safetyHero}>
         <ShieldCheck size={36} color={color.brand} style={{ marginBottom: 4 }} />
         <Copy accessibilityRole="header" size={19} weight={800} style={center}>We’re with you on every ride.</Copy>
@@ -206,8 +325,8 @@ export function Safety() {
           </Pile>
         </Row>
         <Pile gap={4} style={styles.sharePreview}>
-          <Copy size={10} weight={700}>{`Salma’s JUNI trip to ${schedule.campus.code}`}</Copy>
-          <Copy size={8} tint={color.muted}>{`ETA ${schedule.arrival} · Captain & vehicle only`}</Copy>
+          <Copy size={10} weight={700}>{`${firstName}’s JUNI trip to ${data?.campus.code ?? ''}`}</Copy>
+          <Copy size={8} tint={color.muted}>{`${data ? `ETA ${formatTime(data.arrival_at)} · ` : ''}Captain & vehicle only`}</Copy>
         </Pile>
         <Button tone="secondary" icon={copied ? Check : CopyIcon} onPress={() => setCopied(true)}>
           {copied ? 'Secure link copied' : 'Copy secure share link'}
@@ -232,13 +351,14 @@ export function Safety() {
             <>
               <SheetHeading icon={AlertTriangle} title="Send SOS alert?" tone="red"
                 detail="This demo will log an emergency safety event with your trip ID and current timestamp." />
-              <Button tone="danger" onPress={() => setSos('sent')}>Yes, send SOS alert</Button>
+              {!!error && <Copy accessibilityRole="alert" tint={color.danger}>{error}</Copy>}
+              <Button tone="danger" disabled={busy} onPress={sendSos}>{busy ? 'Sending…' : 'Yes, send SOS alert'}</Button>
               <Button tone="secondary" onPress={closeSos}>Cancel</Button>
             </>
           ) : (
             <>
               <SheetHeading icon={CheckCircle2} title="Safety alert logged"
-                detail="Event SAFE-0415-0729 was recorded for trip JUNI-0415. This is an MVP simulation." />
+                detail={`Event ${sosCode} was recorded for trip ${data?.code ?? ''}. This is an MVP simulation.`} />
               <Button onPress={closeSos}>Done</Button>
             </>
           )}
@@ -252,6 +372,7 @@ const styles = StyleSheet.create({
   tabs: { marginBottom: 18, padding: 4, borderRadius: 12, backgroundColor: '#F1F4F3' },
   tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 5, borderRadius: 9, alignItems: 'center' },
   tabActive: { backgroundColor: color.white, ...shadow(2, 8, '#20343012') },
+  emptyCard: { alignItems: 'center', gap: 10, paddingVertical: 28 },
   pastCard: { gap: 6, backgroundColor: '#FAFAFB' },
   rideRouteLine: { width: 3, alignSelf: 'stretch', borderRadius: 3 },
   cancelLink: { alignItems: 'center', marginTop: 13 },

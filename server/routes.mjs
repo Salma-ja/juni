@@ -143,6 +143,16 @@ export function buildRouter() {
     return { ...row, app_now: now, active: row.released_at === null && new Date(row.expires_at) > new Date(now) };
   });
 
+  // ---- Phase 6: rides, cancellation, SOS ----
+  endpoint(r, 'my-bookings', ({ client, profile, now }) =>
+    callCore(client, 'select core.my_bookings($1::uuid,$2::timestamptz) as r', [profile.id, now]));
+  endpoint(r, 'cancel-booking', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.cancel_booking($1::uuid,$2::uuid,$3::timestamptz) as r',
+      [profile.id, uuid(body.bookingId, 'bookingId'), now]));
+  endpoint(r, 'log-sos', ({ client, profile, body, now }) =>
+    callCore(client, 'select core.log_sos($1::uuid,$2::uuid,$3::timestamptz) as r',
+      [profile.id, uuid(body.bookingId, 'bookingId'), now]));
+
   return r;
 }
 

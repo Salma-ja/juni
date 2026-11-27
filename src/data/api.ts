@@ -141,3 +141,11 @@ export const hold = (holdId: string) => call<Hold>('hold', { holdId });
 export const pay = (holdId: string, outcome: 'success' | 'failed', idempotencyKey: string) =>
   call<PayResult>('pay', { holdId, outcome, idempotencyKey });
 export const booking = (bookingId: string) => call<BookingDetail>('booking', { bookingId });
+
+// ---------- rides, cancellation, SOS (Phase 6) ----------
+export type MyBookings = { app_now: string; upcoming: BookingData[]; active: BookingData[]; past: BookingData[] };
+export type CancelResult = { booking_id: string; refund_fils: number; reason: string; hours_before_pickup: number };
+
+export const myBookings = () => call<MyBookings>('my-bookings');
+export const cancelBooking = (bookingId: string) => call<CancelResult>('cancel-booking', { bookingId });
+export const logSos = (bookingId: string) => call<{ code: string; created_at: string }>('log-sos', { bookingId });

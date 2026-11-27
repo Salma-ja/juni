@@ -1,29 +1,33 @@
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ArrowRight, BadgeCheck, Car, CheckCircle2, ChevronRight, Clock3, Coins, Info, LockKeyhole,
-  MapPin, ShieldCheck, Sparkles, Star, UserPlus, Users,
+  MapPin, ShieldCheck, Sparkles, Users, Zap,
 } from 'lucide-react-native';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Badge, center, Copy, Eyebrow, fill, GradientCard, Header, InfoRow, Page, Pile, ProgressBar, Row, SectionHeading, spread, TextLink, Tile } from '@/components/ui';
 import { color, shadow } from '@/theme';
 import { useAuth } from '@/features/authSession';
+import { myBookings } from '@/data/api';
+import { formatDate, formatTime } from '@/data/format';
+import { useLoad } from '@/data/useLoad';
+import { statusBadge } from '@/features/rides';
 
 export function HomeScreen() {
   const router = useRouter();
   const { profile } = useAuth();
+  const { data, reload } = useLoad(() => myBookings(), []);
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
+  const next = data?.upcoming[0] ?? data?.active[0];
+  const badge = next ? statusBadge[next.status] : null;
   return (
     <Page>
       <Row style={styles.homeHeader}>
         <Pile gap={7} style={fill}>
-          <Eyebrow tint={color.muted} size={9}>MONDAY, 14 APRIL</Eyebrow>
+          <Eyebrow tint={color.muted} size={9}>{data ? formatDate(data.app_now).toUpperCase() : ' '}</Eyebrow>
           <Copy accessibilityRole="header" size={28} weight={800} style={{ letterSpacing: -1.4 }}>{`Hi, ${profile?.fullName.split(/\s+/)[0] ?? 'there'}`}</Copy>
           <Badge icon={BadgeCheck} iconSize={14}>{profile?.isDemo ? 'Demo mode · simulated verification' : 'Verified student'}</Badge>
         </Pile>
-        <Pressable accessibilityRole="button" accessibilityLabel="240 points" onPress={() => router.navigate('/points')} style={styles.pointsPill}>
-          <Coins size={17} color="#BD861D" />
-          <Copy size={16} weight={800} tint="#BD861D">240</Copy>
-        </Pressable>
       </Row>
       <GradientCard colors={['#37294F', '#241A39']} style={styles.planCard}>
         <View pointerEvents="none" style={styles.planOrbit} />
@@ -40,38 +44,29 @@ export function HomeScreen() {
         </Pressable>
       </GradientCard>
       <SectionHeading title="Upcoming ride" note="View all" onPress={() => router.navigate('/rides')} />
-      <Pressable accessibilityRole="button" onPress={() => router.push('/status')} style={styles.upcoming}>
-        <Pile gap={4} style={styles.dateTile}>
-          <Copy size={18} weight={800} tint={color.brand}>15</Copy>
-          <Copy size={8} weight={800} tint={color.brand}>APR</Copy>
-        </Pile>
-        <Pile gap={8} style={fill}>
-          <Row gap={6} style={{ flexWrap: 'wrap' }}>
-            <Copy weight={800}>JUST Campus</Copy>
-            <Badge tone="amber">Awaiting captain</Badge>
-          </Row>
-          <Row gap={5}>
-            <Clock3 size={15} color={color.muted} />
-            <Copy size={10} tint={color.muted}>7:20 AM · Student Area</Copy>
-          </Row>
-        </Pile>
-        <ChevronRight size={19} color={color.ink} />
-      </Pressable>
-      <Row gap={11} style={styles.demand}>
-        <Tile icon={Users} size={39} iconSize={22} background={color.white} />
-        <Pile gap={4} style={fill}>
-          <Eyebrow>LIVE DEMAND</Eyebrow>
-          <Copy size={12} weight={800}>12 students are heading to JUST</Copy>
-          <Copy size={9} tint={color.muted}>Between 7:00–8:00 AM from nearby areas</Copy>
-        </Pile>
-        <Row gap={0} style={styles.avatarStack}>
-          {['S', 'L', 'R', '+9'].map((letter, index) => (
-            <View key={letter} style={[styles.avatarDot, index === 3 && { backgroundColor: '#20363C' }]}>
-              <Copy size={8} weight={700} tint={index === 3 ? color.white : color.ink}>{letter}</Copy>
-            </View>
-          ))}
-        </Row>
-      </Row>
+      {next && badge ? (
+        <Pressable accessibilityRole="button"
+          onPress={() => router.push({ pathname: next.status === 'confirmed' || next.status === 'in_progress' ? '/trip' : '/status', params: { bookingId: next.id } })}
+          style={styles.upcoming}>
+          <Pile gap={4} style={styles.dateTile}>
+            <Copy size={18} weight={800} tint={color.brand}>{formatDate(next.pickup_at).split(' ')[1]}</Copy>
+            <Copy size={8} weight={800} tint={color.brand}>{formatDate(next.pickup_at).split(' ')[2]?.toUpperCase()}</Copy>
+          </Pile>
+          <Pile gap={8} style={fill}>
+            <Row gap={6} style={{ flexWrap: 'wrap' }}>
+              <Copy weight={800}>{next.campus.label}</Copy>
+              <Badge tone={badge.tone}>{badge.label}</Badge>
+            </Row>
+            <Row gap={5}>
+              <Clock3 size={15} color={color.muted} />
+              <Copy size={10} tint={color.muted}>{`${formatTime(next.pickup_at)} · ${next.pickup_area.name}`}</Copy>
+            </Row>
+          </Pile>
+          <ChevronRight size={19} color={color.ink} />
+        </Pressable>
+      ) : (
+        <Copy size={11} tint={color.muted} style={{ paddingVertical: 8 }}>No upcoming rides yet. Plan one above.</Copy>
+      )}
       <Pressable accessibilityRole="button" onPress={() => router.push('/rules')} style={styles.rules}>
         <Info size={18} color="#68777C" />
         <Copy size={10} tint="#68777C" style={fill}>Explore system rules & edge cases</Copy>
@@ -109,17 +104,17 @@ export function Profile() {
         <Badge icon={BadgeCheck} iconSize={14} style={{ alignSelf: 'center' }}>{profile?.isDemo ? 'Demo mode · simulated verification' : 'Verified student'}</Badge>
       </Pile>
       <Pile gap={7} style={styles.profileSection}>
-        <Eyebrow>RIDE PREFERENCES</Eyebrow>
+        <Eyebrow>ACCOUNT</Eyebrow>
         <View style={styles.profileRows}>
-          <InfoRow icon={MapPin} label="Home location" value="Student Area, Irbid" onPress={inactive} style={styles.divider} />
-          <InfoRow icon={Users} label="Group preference" value="Girls-only" onPress={inactive} />
+          <InfoRow icon={Users} label="Gender" value={profile?.gender === 'female' ? 'Female' : 'Male'} style={styles.divider} />
+          <InfoRow icon={ShieldCheck} label="Verification" value={profile?.isDemo ? 'Demo · simulated' : 'Verified'} />
         </View>
       </Pile>
       <Pile gap={7} style={styles.profileSection}>
         <Eyebrow>ACTIVITY</Eyebrow>
         <View style={styles.profileRows}>
-          <InfoRow icon={Car} label="Ride history" value="12 completed rides" onPress={() => router.navigate('/rides')} style={styles.divider} />
-          <InfoRow icon={Coins} label="JUNI Points" value="240 points" onPress={() => router.navigate('/points')} />
+          <InfoRow icon={Car} label="Ride history" value="View" onPress={() => router.navigate('/rides')} style={profile?.isDemo ? styles.divider : undefined} />
+          {profile?.isDemo && <InfoRow icon={Zap} label="Demo controls" value="Open" onPress={() => router.push('/demo')} />}
         </View>
       </Pile>
       <TextLink tint="#BC4242" size={11} style={styles.signout}
@@ -128,64 +123,16 @@ export function Profile() {
   );
 }
 
-const earningRules = [
-  [Car, 'Complete a ride', '+30 pts'],
-  [Star, '5 rides without cancellation', '+15 pts'],
-  [UserPlus, 'Fill the last group seat', '+50 pts'],
-  [Users, 'Invite a classmate', '+50 pts'],
-] as const;
-
 export function Points() {
   return (
     <Page>
-      <Header title="Points & rewards" action={<Info size={20} color={color.ink} />} />
+      <Header title="Points & rewards" />
       <GradientCard colors={['#382A52', '#241A39']} style={{ borderRadius: 21 }}>
-        <Eyebrow size={8} tint="#F2A3CC">YOUR BALANCE</Eyebrow>
-        <Row gap={3} style={{ alignItems: 'baseline', marginTop: 7, marginBottom: 16 }}>
-          <Copy size={39} weight={800} tint={color.white} style={{ letterSpacing: -2.34 }}>240</Copy>
-          <Copy size={12} weight={700} tint="#CFC5DA">points</Copy>
-        </Row>
-        <ProgressBar value={80} height={7} track="#FFFFFF1F" />
-        <Row style={[spread, { marginVertical: 8 }]}>
-          <Copy size={8} weight={700} tint={color.white}>60 points to go</Copy>
-          <Copy size={8} tint="#CFC5DA">until your next free ride</Copy>
-        </Row>
-        <Pressable accessibilityRole="button" accessibilityState={{ disabled: true }} disabled style={styles.redeem}>
-          <LockKeyhole size={17} color="#A99EB5" />
-          <Copy size={9} weight={700} tint="#A99EB5">Redeem 300 points for a free ride</Copy>
-        </Pressable>
+        <Eyebrow size={8} tint="#F2A3CC">JUNI POINTS</Eyebrow>
+        <Copy size={26} weight={800} tint={color.white} style={{ marginTop: 8, marginBottom: 8, letterSpacing: -1 }}>Coming soon</Copy>
+        <Copy size={11} tint="#CFC5DA" style={{ lineHeight: 17 }}>Earn points for completed rides and redeem them for free rides. Not part of this build yet.</Copy>
       </GradientCard>
-      <Row gap={10} style={styles.rewardBanner}>
-        <Tile icon={Star} size={37} iconSize={23} tint="#BC8217" background="#FFE9A8" />
-        <Pile gap={3}>
-          <Copy size={10} weight={800}>1 free ride = 300 points</Copy>
-          <Copy size={8} tint={color.muted}>Up to 1.50 JD value</Copy>
-        </Pile>
-      </Row>
-      <SectionHeading title="Ways to earn" note="Earn more, ride more" />
-      <View style={styles.earnList}>
-        {earningRules.map(([Icon, title, points], index) => (
-          <Row gap={10} key={title} style={[styles.earnRow, index < earningRules.length - 1 && styles.divider]}>
-            <Tile icon={Icon} size={34} iconSize={20} />
-            <Copy size={9} weight={800} style={fill}>{title}</Copy>
-            <Copy size={9} weight={800} tint={color.brand}>{points}</Copy>
-          </Row>
-        ))}
-      </View>
-      <SectionHeading title="Recent activity" />
-      <LedgerRow icon={CheckCircle2} title="Ride completed · 8 Apr" value="+30" />
-      <LedgerRow icon={UserPlus} title="Invited Lina · 2 Apr" value="+50" />
     </Page>
-  );
-}
-
-function LedgerRow({ icon: Icon, title, value }: { icon: typeof UserPlus; title: string; value: string }) {
-  return (
-    <Row gap={7} style={[styles.divider, { paddingVertical: 10, paddingHorizontal: 3 }]}>
-      <Icon size={18} color={color.brand} />
-      <Copy size={9} tint={color.muted} style={fill}>{title}</Copy>
-      <Copy size={9} weight={800} tint={color.brand}>{value}</Copy>
-    </Row>
   );
 }
 

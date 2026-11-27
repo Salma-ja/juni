@@ -19,6 +19,7 @@ import {
 import { errorCopy } from '@/data/errors';
 import { ammanInstant, formatDate, formatFils, formatTime } from '@/data/format';
 import { useRefData } from '@/data/refdata';
+import { useLoad } from '@/data/useLoad';
 import { useAuth } from '@/features/authSession';
 
 type PlanParams = { campusId?: string; pickupAreaId?: string; date?: string; classTime?: string };
@@ -260,19 +261,6 @@ function ScheduleCell({ label, accessibilityLabel, selected, disabled = false, o
       <Copy size={10} weight={700} tint={disabled ? '#AAA5B0' : selected ? color.white : color.navy} style={center}>{label}</Copy>
     </Pressable>
   );
-}
-
-/** Load one async result keyed by deps. */
-function useLoad<T>(load: () => Promise<{ ok: true; data: T } | { ok: false; code: string }>, deps: unknown[]) {
-  const [state, setState] = useState<{ data?: T; code?: string; loading: boolean }>({ loading: true });
-  useEffect(() => {
-    let live = true;
-    setState((s) => ({ ...s, loading: true }));
-    load().then((res) => { if (live) setState(res.ok ? { data: res.data, loading: false } : { code: res.code, loading: false }); });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  return state;
 }
 
 export function Suggestion() {

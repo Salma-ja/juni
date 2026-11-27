@@ -286,7 +286,7 @@ export function ProgressBar({ value, height = 4, track = '#E2E9E7' }: { value: n
 const captainPhoto = require('../../assets/images/captain-omar.png');
 
 export function CaptainPhoto({ style }: { style?: StyleProp<import('react-native').ImageStyle> }) {
-  return <Image accessible accessibilityLabel="Captain Omar Khalil" source={captainPhoto} style={[styles.captainPhoto, style]} />;
+  return <Image accessible accessibilityLabel="Captain photo" source={captainPhoto} style={[styles.captainPhoto, style]} />;
 }
 
 export function CaptainMini({ label, title, accessory }: { label: string; title: string; accessory?: ReactNode }) {
